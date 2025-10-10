@@ -8,17 +8,18 @@ eBay出品者向けのトレンドリサーチツール - 出品商品のパフ�
 - **自動データ収集**: 1日1回、全出品物のメトリクスを自動取得（2,000件/アカウント）
 - **トレンド分析**: View数・Watch数の成長率を分析し、TOP10を自動抽出
 - **ダッシュボード**: トレンド商品の可視化とパフォーマンス推移表示
-- **通知機能**: トレンド商品検出時のアラート
+- **Analytics統合**: Click-Through Rate、Impression、Conversion Rateの詳細分析
+- **Feed API統合**: 初回同期時の高速バルクデータ取得
 
 ## 🏗️ 技術スタック
 
 | レイヤー | 技術 |
 |---------|------|
-| **Frontend** | React 18 + TypeScript + Material-UI |
+| **Frontend** | React 18 + TypeScript + Material-UI + Recharts |
 | **Backend** | FastAPI (Python 3.11+) |
 | **Database** | PostgreSQL 16 |
 | **Cache/Queue** | Redis 7 |
-| **Background Jobs** | Celery + APScheduler |
+| **Background Jobs** | Celery + Celery Beat |
 | **Container** | Docker + Docker Compose |
 
 ## 📋 前提条件
@@ -59,6 +60,9 @@ EBAY_CLIENT_ID=your_ebay_client_id
 EBAY_CLIENT_SECRET=your_ebay_client_secret
 EBAY_REDIRECT_URI=http://localhost:8000/api/ebay-accounts/callback
 EBAY_ENVIRONMENT=sandbox  # または production
+
+# モックモード（開発用）
+EBAY_MOCK_MODE=true  # eBay認証情報なしで開発可能
 ```
 
 **暗号化キーの生成方法:**
@@ -110,7 +114,7 @@ my_trend_search/
 │   │   ├── api/         # APIエンドポイント
 │   │   ├── models/      # SQLAlchemyモデル
 │   │   ├── services/    # ビジネスロジック
-│   │   ├── clients/     # 外部APIクライアント
+│   │   ├── clients/     # 外部APIクライアント (eBay Trading/Analytics/Feed)
 │   │   ├── schemas/     # Pydanticスキーマ
 │   │   ├── utils/       # ユーティリティ
 │   │   └── tasks/       # Celeryタスク
@@ -164,14 +168,16 @@ docker-compose exec backend pytest --cov=app --cov-report=html
 
 ## 📝 開発状況
 
-### ✅ Phase 1: 基盤構築（完了）
+### ✅ Phase 1-7: 完了
+
+#### Phase 1: 基盤構築
 - [x] プロジェクト骨格
 - [x] Docker環境（PostgreSQL, Redis, FastAPI, React, Celery）
 - [x] データベース設計
 - [x] 基本的なFastAPIアプリケーション
 - [x] Reactアプリケーション雛形
 
-### ✅ Phase 2: 認証システム（完了）
+#### Phase 2: 認証システム
 - [x] ユーザー登録・ログイン機能（Backend）
 - [x] JWT発行・検証（アクセストークン24時間、リフレッシュトークン30日）
 - [x] パスワードハッシュ化（bcrypt）
@@ -179,14 +185,14 @@ docker-compose exec backend pytest --cov=app --cov-report=html
 - [x] Redux状態管理
 - [x] トークン自動リフレッシュ機能
 
-### ✅ Phase 3: eBay OAuth連携（完了）
+#### Phase 3: eBay OAuth連携
 - [x] OAuth 2.0フロー実装
 - [x] トークン暗号化（AES-256-GCM）
 - [x] トークン自動リフレッシュ
 - [x] フロントエンドOAuth UI
 - [x] アカウント接続・切断機能
 
-### ✅ Phase 4: データ同期（完了 - モックモード対応）
+#### Phase 4: データ同期
 - [x] eBay Trading APIクライアント
 - [x] Listing・DailyMetricモデル
 - [x] データ同期サービス
@@ -194,18 +200,28 @@ docker-compose exec backend pytest --cov=app --cov-report=html
 - [x] 同期APIエンドポイント
 - [x] **モックモード実装**（eBay認証情報なしで開発・テスト可能）
 
-### 🔄 Phase 5: トレンド分析（次のステップ）
-- [ ] トレンドスコア計算ロジック
-- [ ] TOP10抽出アルゴリズム
-- [ ] トレンド分析Celeryタスク
-- [ ] トレンド分析APIエンドポイント
+#### Phase 5: トレンド分析
+- [x] TrendAnalysisモデル
+- [x] トレンドスコア計算ロジック（View成長率×0.4 + Watch成長率×0.4 + 価格勢い×0.2）
+- [x] TOP10抽出アルゴリズム
+- [x] 7日間移動平均算出
+- [x] トレンド分析Celeryタスク
+- [x] トレンド分析APIエンドポイント
 
-### 📅 今後の予定
-- Phase 6: ダッシュボード（トレンド可視化、グラフ表示）
-- Phase 7: 追加機能（通知、Analytics API統合）
-- Phase 8: テスト・最適化
+#### Phase 6: ダッシュボード強化
+- [x] ダッシュボードKPI表示（実データ接続）
+- [x] パフォーマンスグラフ（Recharts）
+- [x] トレンドTOP10リスト表示
+- [x] ダッシュボードAPI（Summary/Performance）
+- [x] リアルタイムデータ更新
 
-詳細は`CLAUDE.md`を参照してください。
+#### Phase 7: Analytics & Feed API統合
+- [x] Analytics APIクライアント（CTR、Impression、Conversion）
+- [x] Feed APIクライアント（バルク同期）
+- [x] AnalyticsMetricモデル
+- [x] Analytics同期サービス
+- [x] Feed同期サービス
+- [x] Analytics/Feed Celeryタスク
 
 ## 🧪 モックモードでの開発
 
@@ -221,7 +237,7 @@ EBAY_MOCK_MODE=true
 **モックモードの動作:**
 - eBay APIの代わりに、リアルなモックデータを生成
 - 50件の出品商品データを自動生成
-- View数、Watch数、価格などのメトリクスを含む
+- View数、Watch数、価格、Analytics指標（CTR、Impression等）を含む
 - 実際のeBay API呼び出しは行わない
 
 **本番モードへの切り替え:**
@@ -247,17 +263,40 @@ EBAY_MOCK_MODE=false
 
 | タスク | スケジュール | 説明 |
 |--------|-------------|------|
-| **日次データ同期** | 毎日午前2時（UTC） | 全アカウントの出品物データを同期 |
+| **日次データ同期** | 毎日午前2:00（UTC） | Trading APIで全アカウントの出品物データを同期 |
+| **Analytics同期** | 毎日午前2:30（UTC） | Analytics APIで詳細トラフィックデータを取得 |
+| **トレンド分析** | 毎日午前3:00（UTC） | 成長率計算・TOP10抽出 |
 | **トークンリフレッシュ** | 毎時 | 有効期限が2時間以内のトークンを更新 |
 
 **手動同期の実行:**
 ```bash
-# APIエンドポイント経由
+# データ同期（Trading API）
 curl -X POST http://localhost:8000/api/sync/trigger \
   -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# トレンド分析
+curl -X POST http://localhost:8000/api/trends/analyze \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+
+# バルク同期（Feed API - 初回同期向け）
+# 注: この機能は手動トリガーのみ（自動スケジュールなし）
 ```
 
-詳細は`CLAUDE.md`を参照してください。
+## 🔄 データ取得フロー
+
+### Trading API（日次更新）
+- View数、Watch数を2,000件まで取得
+- 毎日自動実行（午前2時UTC）
+
+### Analytics API（日次更新）
+- Click-Through Rate、Impression、Conversion Rate
+- 50件ずつバッチ処理
+- 毎日自動実行（午前2:30 UTC）
+
+### Feed API（初回同期のみ）
+- 2,000件以上の出品物を一度に取得
+- Trading APIの10-100倍高速
+- 手動トリガーのみ（自動スケジュールなし）
 
 ## 🐛 トラブルシューティング
 
@@ -290,8 +329,12 @@ docker-compose up -d
 ## 📚 参考リンク
 
 - [eBay Developer Program](https://developer.ebay.com/)
+- [eBay Trading API Reference](https://developer.ebay.com/Devzone/XML/docs/Reference/eBay/index.html)
+- [eBay Analytics API](https://developer.ebay.com/api-docs/sell/analytics/overview.html)
+- [eBay Feed API](https://developer.ebay.com/api-docs/sell/feed/overview.html)
 - [FastAPI Documentation](https://fastapi.tiangolo.com/)
 - [Material-UI](https://mui.com/)
+- [Recharts](https://recharts.org/)
 - [SQLAlchemy](https://www.sqlalchemy.org/)
 - [Celery](https://docs.celeryq.dev/)
 
