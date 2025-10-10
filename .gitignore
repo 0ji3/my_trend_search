@@ -65,6 +65,10 @@ frontend/.env.production.local
 *~
 .DS_Store
 
+# Claude Code and Serena
+.claude/
+.serena/
+
 # Docker
 *.log
 
