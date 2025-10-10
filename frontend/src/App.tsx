@@ -12,6 +12,7 @@ import { store } from './store/store';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
+import OAuthCallback from './pages/OAuthCallback';
 
 // Components
 import PrivateRoute from './components/common/PrivateRoute';
@@ -26,6 +27,16 @@ function App() {
             {/* Public Routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+
+            {/* OAuth Callback (Protected) */}
+            <Route
+              path="/oauth/callback"
+              element={
+                <PrivateRoute>
+                  <OAuthCallback />
+                </PrivateRoute>
+              }
+            />
 
             {/* Protected Routes */}
             <Route

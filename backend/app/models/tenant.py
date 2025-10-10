@@ -3,6 +3,7 @@ Tenant (User) Model
 """
 from sqlalchemy import Column, String, DateTime
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 from datetime import datetime
 import uuid
 import enum
@@ -38,6 +39,10 @@ class Tenant(Base):
     )
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    oauth_credential = relationship("OAuthCredential", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
+    ebay_accounts = relationship("EbayAccount", back_populates="tenant", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Tenant(id={self.id}, email={self.email}, status={self.status})>"

@@ -15,8 +15,7 @@ from app.config import settings
 from app.database import Base
 
 # Import all models to ensure they're registered with Base.metadata
-# This will be populated as we create models
-# from app.models import tenant, oauth_credential, ebay_account, listing, daily_metric, trend_analysis
+from app.models import Tenant, OAuthCredential, EbayAccount
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

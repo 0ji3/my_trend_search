@@ -53,3 +53,31 @@ export interface AuthState {
   isLoading: boolean;
   error: string | null;
 }
+
+// eBay OAuth types
+export interface OAuthAuthorizationURL {
+  authorization_url: string;
+  state: string;
+}
+
+export interface EbayAccount {
+  id: string;
+  tenant_id: string;
+  oauth_credential_id: string;
+  ebay_user_id: string;
+  username?: string;
+  email?: string;
+  marketplace_id: string;
+  is_active: boolean;
+  last_sync_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OAuthStatus {
+  is_connected: boolean;
+  has_valid_token: boolean;
+  access_token_expires_at?: string;
+  accounts_count: number;
+  accounts: EbayAccount[];
+}

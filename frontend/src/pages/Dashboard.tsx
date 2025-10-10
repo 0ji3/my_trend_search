@@ -15,6 +15,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout } from '../store/authSlice';
+import EbayConnection from '../components/ebay/EbayConnection';
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
@@ -106,6 +107,10 @@ const Dashboard: React.FC = () => {
           </Grid>
 
           <Grid item xs={12}>
+            <EbayConnection />
+          </Grid>
+
+          <Grid item xs={12}>
             <Paper sx={{ p: 3 }}>
               <Typography variant="h6" gutterBottom>
                 Getting Started
@@ -116,7 +121,7 @@ const Dashboard: React.FC = () => {
               <ol>
                 <li>
                   <Typography variant="body2" paragraph>
-                    Connect your eBay account to start monitoring your listings
+                    Connect your eBay account above to start monitoring your listings
                   </Typography>
                 </li>
                 <li>
@@ -135,9 +140,6 @@ const Dashboard: React.FC = () => {
                   </Typography>
                 </li>
               </ol>
-              <Button variant="contained" sx={{ mt: 2 }} disabled>
-                Connect eBay Account (Coming Soon)
-              </Button>
             </Paper>
           </Grid>
         </Grid>
