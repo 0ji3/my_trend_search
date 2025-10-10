@@ -274,13 +274,13 @@ class EbayOAuthService:
 
         return credential
 
-    def get_valid_access_token(self, db: Session, tenant: Tenant) -> Optional[str]:
+    async def get_valid_access_token(self, db: Session, tenant_id) -> Optional[str]:
         """
         Get valid access token for tenant (auto-refresh if expired)
 
         Args:
             db: Database session
-            tenant: Tenant object
+            tenant_id: Tenant ID (UUID or Tenant object)
 
         Returns:
             str: Valid access token or None if not available
@@ -288,8 +288,12 @@ class EbayOAuthService:
         Raises:
             ValueError: If token refresh fails
         """
+        # Handle both UUID and Tenant object
+        if hasattr(tenant_id, 'id'):
+            tenant_id = tenant_id.id
+
         credential = db.query(OAuthCredential).filter(
-            OAuthCredential.tenant_id == tenant.id,
+            OAuthCredential.tenant_id == tenant_id,
             OAuthCredential.is_valid == True
         ).first()
 
@@ -310,7 +314,7 @@ class EbayOAuthService:
             return tokens['access_token']
 
         # Access token expired, try to refresh
-        logger.info(f"Access token expired for tenant {tenant.id}, refreshing...")
+        logger.info(f"Access token expired for tenant {tenant_id}, refreshing...")
 
         # Decrypt refresh token
         tokens = decrypt_oauth_tokens(
@@ -339,7 +343,7 @@ class EbayOAuthService:
 
         db.commit()
 
-        logger.info(f"Successfully refreshed access token for tenant: {tenant.id}")
+        logger.info(f"Successfully refreshed access token for tenant: {tenant_id}")
 
         return new_tokens['access_token']
 

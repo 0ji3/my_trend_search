@@ -50,7 +50,7 @@ class EbayAccount(Base):
     # Relationships
     tenant = relationship("Tenant", back_populates="ebay_accounts")
     oauth_credential = relationship("OAuthCredential", back_populates="ebay_accounts")
-    # listings = relationship("Listing", back_populates="account", cascade="all, delete-orphan")
+    listings = relationship("Listing", back_populates="account", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<EbayAccount(id={self.id}, ebay_user_id={self.ebay_user_id}, username={self.username})>"

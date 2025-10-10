@@ -79,17 +79,17 @@ async def api_health_check():
 
 
 # API routers
-from app.api import auth, ebay_accounts
+from app.api import auth, ebay_accounts, sync, listings
 
 app.include_router(auth.router, prefix="/api/auth", tags=["Authentication"])
 app.include_router(ebay_accounts.router, prefix="/api/ebay-accounts", tags=["eBay Accounts"])
+app.include_router(sync.router, prefix="/api", tags=["Sync"])
+app.include_router(listings.router, prefix="/api", tags=["Listings"])
 
 # Future routers will be added here
-# from app.api import listings, trends, dashboard, sync
-# app.include_router(listings.router, prefix="/api/listings", tags=["Listings"])
+# from app.api import trends, dashboard
 # app.include_router(trends.router, prefix="/api/trends", tags=["Trends"])
 # app.include_router(dashboard.router, prefix="/api/dashboard", tags=["Dashboard"])
-# app.include_router(sync.router, prefix="/api/sync", tags=["Sync"])
 
 
 if __name__ == "__main__":
