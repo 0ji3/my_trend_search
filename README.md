@@ -166,23 +166,96 @@ docker-compose exec backend pytest --cov=app --cov-report=html
 
 ### ✅ Phase 1: 基盤構築（完了）
 - [x] プロジェクト骨格
-- [x] Docker環境
+- [x] Docker環境（PostgreSQL, Redis, FastAPI, React, Celery）
 - [x] データベース設計
 - [x] 基本的なFastAPIアプリケーション
 - [x] Reactアプリケーション雛形
 
-### 🔄 Phase 2: 認証システム（次のステップ）
-- [ ] ユーザー登録・ログイン機能
-- [ ] JWT発行・検証
-- [ ] フロントエンドのログイン画面
+### ✅ Phase 2: 認証システム（完了）
+- [x] ユーザー登録・ログイン機能（Backend）
+- [x] JWT発行・検証（アクセストークン24時間、リフレッシュトークン30日）
+- [x] パスワードハッシュ化（bcrypt）
+- [x] フロントエンドのログイン・登録画面
+- [x] Redux状態管理
+- [x] トークン自動リフレッシュ機能
+
+### ✅ Phase 3: eBay OAuth連携（完了）
+- [x] OAuth 2.0フロー実装
+- [x] トークン暗号化（AES-256-GCM）
+- [x] トークン自動リフレッシュ
+- [x] フロントエンドOAuth UI
+- [x] アカウント接続・切断機能
+
+### ✅ Phase 4: データ同期（完了 - モックモード対応）
+- [x] eBay Trading APIクライアント
+- [x] Listing・DailyMetricモデル
+- [x] データ同期サービス
+- [x] Celeryバックグラウンドタスク（日次同期、トークンリフレッシュ）
+- [x] 同期APIエンドポイント
+- [x] **モックモード実装**（eBay認証情報なしで開発・テスト可能）
+
+### 🔄 Phase 5: トレンド分析（次のステップ）
+- [ ] トレンドスコア計算ロジック
+- [ ] TOP10抽出アルゴリズム
+- [ ] トレンド分析Celeryタスク
+- [ ] トレンド分析APIエンドポイント
 
 ### 📅 今後の予定
-- Phase 3: eBay OAuth連携
-- Phase 4: データ同期
-- Phase 5: トレンド分析
-- Phase 6: ダッシュボード
-- Phase 7: 追加機能
+- Phase 6: ダッシュボード（トレンド可視化、グラフ表示）
+- Phase 7: 追加機能（通知、Analytics API統合）
 - Phase 8: テスト・最適化
+
+詳細は`CLAUDE.md`を参照してください。
+
+## 🧪 モックモードでの開発
+
+eBayの認証情報が未取得の場合でも、モックモードで開発・テストが可能です。
+
+**モックモードの有効化:**
+
+`.env`ファイルで以下を設定:
+```env
+EBAY_MOCK_MODE=true
+```
+
+**モックモードの動作:**
+- eBay APIの代わりに、リアルなモックデータを生成
+- 50件の出品商品データを自動生成
+- View数、Watch数、価格などのメトリクスを含む
+- 実際のeBay API呼び出しは行わない
+
+**本番モードへの切り替え:**
+
+eBay認証情報取得後、以下を設定:
+```env
+EBAY_CLIENT_ID=your_actual_client_id
+EBAY_CLIENT_SECRET=your_actual_client_secret
+EBAY_MOCK_MODE=false
+```
+
+## 🔑 eBay API認証情報の取得
+
+1. [eBay Developer Program](https://developer.ebay.com/)にアクセス
+2. アカウント登録・ログイン
+3. 「My Account」→「Application Keys」からアプリケーションを作成
+4. **App ID (Client ID)** と **Cert ID (Client Secret)** を取得
+5. OAuth Redirect URIを設定: `http://localhost:8000/api/ebay-accounts/callback`
+
+## 📊 Celeryバックグラウンドタスク
+
+以下のタスクが自動実行されます:
+
+| タスク | スケジュール | 説明 |
+|--------|-------------|------|
+| **日次データ同期** | 毎日午前2時（UTC） | 全アカウントの出品物データを同期 |
+| **トークンリフレッシュ** | 毎時 | 有効期限が2時間以内のトークンを更新 |
+
+**手動同期の実行:**
+```bash
+# APIエンドポイント経由
+curl -X POST http://localhost:8000/api/sync/trigger \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
 
 詳細は`CLAUDE.md`を参照してください。
 

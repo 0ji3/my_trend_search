@@ -1,6 +1,6 @@
 # CLAUDE.md - eBay トレンドリサーチツール 開発ガイド
 
-このドキュメントは、Claude Codeでの開発を円滑に進めるための包括的なガイドです。
+このドキュメントは、Claude Codeでの開発を円滑に進めるための開発ガイドです。
 
 ---
 
@@ -21,932 +21,398 @@ eBay出品者が自身の商品パフォーマンスをモニタリングし、V
 
 ---
 
-## 🏗️ システムアーキテクチャ
+## 📝 実装状況
 
-### 技術スタック
+### ✅ Phase 1-4: 完了（詳細はREADME.md参照）
 
-| レイヤー | 技術 | バージョン |
-|---------|------|-----------|
-| **Frontend** | React + TypeScript + Material-UI | React 18.2+ |
-| **Backend API** | FastAPI (Python) | Python 3.11+ |
-| **Background Jobs** | Celery + APScheduler | - |
-| **Database** | PostgreSQL | 18 |
-| **Cache/Queue** | Redis | 7 |
-| **Container** | Docker + Docker Compose | - |
+- **Phase 1**: 基盤構築（Docker、PostgreSQL、Redis、FastAPI、React）
+- **Phase 2**: 認証システム（JWT、bcrypt、Redux）
+- **Phase 3**: eBay OAuth連携（AES-256-GCM暗号化）
+- **Phase 4**: データ同期（Trading API、Celery、**モックモード対応**）
 
-### アーキテクチャ図
+### 🔄 Phase 5: トレンド分析（次のステップ）
 
-```
-┌─────────────────────────────┐
-│   Frontend (React + MUI)    │
-│   Port: 3000                │
-└─────────────┬───────────────┘
-              │ HTTP/REST
-              ▼
-┌─────────────────────────────┐
-│   FastAPI (CORS Enabled)    │
-│   Port: 8000                │
-└─────────────┬───────────────┘
-              │
-    ┌─────────┼─────────┐
-    ▼         ▼         ▼
-┌────────┐ ┌────────┐ ┌────────┐
-│Auth    │ │Sync    │ │Trend   │
-│Service │ │Service │ │Service │
-└────────┘ └────────┘ └────────┘
-              │
-    ┌─────────┼─────────┐
-    ▼         ▼         ▼
-┌────────┐ ┌────────┐ ┌────────┐
-│Postgres│ │Redis   │ │Celery  │
-│18      │ │7       │ │Worker  │
-└────────┘ └────────┘ └────────┘
-```
+**実装が必要なファイル:**
 
----
+#### Backend
+1. **`backend/app/models/trend_analysis.py`** - TrendAnalysisモデル
+2. **`backend/app/services/trend_analysis_service.py`** - トレンド分析サービス
+3. **`backend/app/tasks/trend_analysis.py`** - Celeryトレンド分析タスク
+4. **`backend/app/api/trends.py`** - トレンドAPIエンドポイント
+5. **`backend/app/schemas/trend.py`** - トレンドPydanticスキーマ
+6. **Alembicマイグレーション** - trend_analysisテーブル
 
-## 📂 プロジェクト構造
+#### Frontend
+1. **`frontend/src/components/trends/TrendChart.tsx`** - トレンドグラフ（Recharts使用）
+2. **`frontend/src/components/trends/TrendList.tsx`** - トレンド商品リスト
+3. **`frontend/src/pages/Trends.tsx`** - トレンドページ
+4. **`frontend/src/services/trends.service.ts`** - トレンドAPIサービス
+5. **`frontend/src/store/trendsSlice.ts`** - Reduxトレンドスライス
 
-```
-ebay-trend-research/
-├── backend/
-│   ├── app/
-│   │   ├── __init__.py
-│   │   ├── main.py                 # FastAPI アプリケーション
-│   │   ├── config.py               # 設定管理
-│   │   ├── database.py             # DB接続
-│   │   │
-│   │   ├── models/                 # SQLAlchemy モデル
-│   │   │   ├── __init__.py
-│   │   │   ├── tenant.py
-│   │   │   ├── oauth_credential.py
-│   │   │   ├── ebay_account.py
-│   │   │   ├── listing.py
-│   │   │   ├── daily_metric.py
-│   │   │   └── trend_analysis.py
-│   │   │
-│   │   ├── api/                    # APIエンドポイント
-│   │   │   ├── __init__.py
-│   │   │   ├── auth.py
-│   │   │   ├── ebay_accounts.py
-│   │   │   ├── listings.py
-│   │   │   ├── trends.py
-│   │   │   ├── dashboard.py
-│   │   │   └── sync.py
-│   │   │
-│   │   ├── services/               # ビジネスロジック
-│   │   │   ├── __init__.py
-│   │   │   ├── auth_service.py
-│   │   │   ├── ebay_oauth_service.py
-│   │   │   ├── ebay_data_sync_service.py
-│   │   │   ├── trend_analysis_service.py
-│   │   │   └── notification_service.py
-│   │   │
-│   │   ├── clients/                # 外部API クライアント
-│   │   │   ├── __init__.py
-│   │   │   ├── ebay_client_base.py
-│   │   │   ├── trading_api_client.py
-│   │   │   ├── inventory_api_client.py
-│   │   │   ├── analytics_api_client.py
-│   │   │   └── feed_api_client.py
-│   │   │
-│   │   ├── schemas/                # Pydantic スキーマ
-│   │   │   ├── __init__.py
-│   │   │   ├── auth.py
-│   │   │   ├── listing.py
-│   │   │   └── trend.py
-│   │   │
-│   │   ├── utils/                  # ユーティリティ
-│   │   │   ├── __init__.py
-│   │   │   ├── security.py         # 暗号化・JWT
-│   │   │   ├── logging.py
-│   │   │   └── rate_limiter.py
-│   │   │
-│   │   ├── tasks/                  # Celery タスク
-│   │   │   ├── __init__.py
-│   │   │   ├── daily_sync.py
-│   │   │   ├── trend_analysis.py
-│   │   │   └── token_refresh.py
-│   │   │
-│   │   └── celery_app.py           # Celery設定
-│   │
-│   ├── alembic/                    # DBマイグレーション
-│   │   ├── versions/
-│   │   └── env.py
-│   │
-│   ├── tests/
-│   │   ├── conftest.py
-│   │   ├── test_auth.py
-│   │   └── test_trends.py
-│   │
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   └── alembic.ini
-│
-├── frontend/
-│   ├── public/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── common/
-│   │   │   │   ├── Header.tsx
-│   │   │   │   ├── Sidebar.tsx
-│   │   │   │   └── NotificationBell.tsx
-│   │   │   ├── auth/
-│   │   │   │   ├── LoginForm.tsx
-│   │   │   │   └── RegisterForm.tsx
-│   │   │   ├── dashboard/
-│   │   │   │   ├── DashboardLayout.tsx
-│   │   │   │   ├── KPICards.tsx
-│   │   │   │   └── TrendingItemsList.tsx
-│   │   │   ├── listings/
-│   │   │   │   ├── ListingsTable.tsx
-│   │   │   │   └── ListingDetail.tsx
-│   │   │   └── trends/
-│   │   │       ├── TrendChart.tsx
-│   │   │       └── TrendList.tsx
-│   │   │
-│   │   ├── pages/
-│   │   │   ├── Dashboard.tsx
-│   │   │   ├── Listings.tsx
-│   │   │   ├── Trends.tsx
-│   │   │   └── Login.tsx
-│   │   │
-│   │   ├── services/
-│   │   │   ├── api.ts
-│   │   │   ├── auth.service.ts
-│   │   │   └── listings.service.ts
-│   │   │
-│   │   ├── store/                  # Redux
-│   │   │   ├── store.ts
-│   │   │   ├── authSlice.ts
-│   │   │   └── trendsSlice.ts
-│   │   │
-│   │   ├── theme/
-│   │   │   └── theme.ts            # MUI テーマ
-│   │   │
-│   │   ├── types/
-│   │   │   └── index.ts
-│   │   │
-│   │   ├── App.tsx
-│   │   └── index.tsx
-│   │
-│   ├── Dockerfile
-│   ├── package.json
-│   └── tsconfig.json
-│
-├── database/
-│   └── init.sql                    # 初期DDL
-│
-├── docker-compose.yml
-├── .env.example
-├── .gitignore
-├── README.md
-└── CLAUDE.md                       # このファイル
-```
+**実装内容:**
 
----
-
-## 🗄️ データベース設計
-
-### ER図
-
-```
-tenants (ユーザー)
-  ↓ 1:N
-oauth_credentials (OAuth認証情報)
-  ↓ 1:N
-ebay_accounts (eBayアカウント)
-  ↓ 1:N
-listings (出品商品)
-  ↓ 1:N
-daily_metrics (日次メトリクス)
-  ↓ 1:N
-trend_analysis (トレンド分析結果)
-```
-
-### 主要テーブル
-
-#### tenants
-```sql
-CREATE TABLE tenants (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email VARCHAR(255) NOT NULL UNIQUE,
-    password_hash VARCHAR(255) NOT NULL,
-    business_name VARCHAR(255),
-    timezone VARCHAR(50) DEFAULT 'UTC',
-    status VARCHAR(20) DEFAULT 'active',
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-#### oauth_credentials
-```sql
-CREATE TABLE oauth_credentials (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    access_token_encrypted BYTEA NOT NULL,
-    access_token_iv BYTEA NOT NULL,
-    access_token_auth_tag BYTEA NOT NULL,
-    refresh_token_encrypted BYTEA NOT NULL,
-    refresh_token_iv BYTEA NOT NULL,
-    refresh_token_auth_tag BYTEA NOT NULL,
-    access_token_expires_at TIMESTAMP NOT NULL,
-    refresh_token_expires_at TIMESTAMP,
-    scopes TEXT[] NOT NULL,
-    is_valid BOOLEAN DEFAULT true,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(tenant_id)
-);
-```
-
-#### listings
-```sql
-CREATE TABLE listings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    account_id UUID NOT NULL REFERENCES ebay_accounts(id) ON DELETE CASCADE,
-    item_id VARCHAR(50) NOT NULL,
-    title TEXT NOT NULL,
-    price DECIMAL(12, 2),
-    currency VARCHAR(3) DEFAULT 'USD',
-    category_id VARCHAR(50),
-    category_name VARCHAR(255),
-    is_active BOOLEAN DEFAULT true,
-    image_url TEXT,
-    item_specifics JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(account_id, item_id)
-);
-```
-
-#### daily_metrics
-```sql
-CREATE TABLE daily_metrics (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
-    recorded_date DATE NOT NULL,
-    view_count INTEGER DEFAULT 0,
-    watch_count INTEGER DEFAULT 0,
-    bid_count INTEGER DEFAULT 0,
-    current_price DECIMAL(12, 2),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(listing_id, recorded_date)
-);
-```
-
-#### trend_analysis
-```sql
-CREATE TABLE trend_analysis (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
-    analysis_date DATE NOT NULL,
-    view_growth_rate DECIMAL(8, 2),
-    watch_growth_rate DECIMAL(8, 2),
-    view_7day_avg DECIMAL(10, 2),
-    watch_7day_avg DECIMAL(10, 2),
-    trend_score DECIMAL(10, 2) NOT NULL,
-    rank INTEGER,
-    is_trending BOOLEAN DEFAULT false,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(listing_id, analysis_date)
-);
-```
-
-**完全なDDLは `database/init.sql` を参照**
-
----
-
-## 🔌 API設計
-
-### 認証エンドポイント
-
-```
-POST   /api/auth/register          ユーザー登録
-POST   /api/auth/login             ログイン
-POST   /api/auth/refresh           トークンリフレッシュ
-POST   /api/auth/logout            ログアウト
-```
-
-### eBayアカウント管理
-
-```
-GET    /api/ebay-accounts                     アカウント一覧
-GET    /api/ebay-accounts/auth-url            OAuth URL生成
-POST   /api/ebay-accounts/callback            OAuth コールバック
-DELETE /api/ebay-accounts/{account_id}        アカウント削除
-```
-
-### 出品商品
-
-```
-GET    /api/listings                          商品一覧
-GET    /api/listings/{listing_id}             商品詳細
-```
-
-### トレンド分析
-
-```
-GET    /api/trends/top10                      本日のTOP10
-GET    /api/trends/history/{listing_id}       商品別トレンド履歴
-```
-
-### ダッシュボード
-
-```
-GET    /api/dashboard/summary                 サマリー情報
-GET    /api/dashboard/performance             パフォーマンス推移
-```
-
-### データ同期
-
-```
-POST   /api/sync/trigger                      手動同期トリガー
-GET    /api/sync/status/{job_id}              同期ステータス確認
-```
-
-**詳細は各APIエンドポイントのコメントを参照**
-
----
-
-## 🔐 セキュリティ設計
-
-### 1. ユーザー認証
-- **パスワードハッシュ化**: bcrypt (コスト係数12)
-- **JWT**: アクセストークン(24時間) + リフレッシュトークン(30日間)
-- **アルゴリズム**: HS256
-
-### 2. eBay OAuth トークン暗号化
-- **暗号化方式**: AES-256-GCM
-- **キー管理**: 環境変数（将来的にはAWS KMS推奨）
-- **保存形式**: 暗号化データ + IV + 認証タグ
-
-```python
-# 実装例
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
-def encrypt_token(plaintext: str, master_key: bytes) -> dict:
-    aesgcm = AESGCM(master_key)
-    iv = os.urandom(12)
-    ciphertext = aesgcm.encrypt(iv, plaintext.encode(), None)
-    return {
-        'encrypted': ciphertext[:-16],
-        'iv': iv,
-        'auth_tag': ciphertext[-16:]
-    }
-```
-
-### 3. Row Level Security (RLS)
-PostgreSQLのRLSを使用してテナントごとのデータを完全分離
-
-```sql
-ALTER TABLE listings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation_policy ON listings
-    USING (account_id IN (
-        SELECT id FROM ebay_accounts 
-        WHERE tenant_id = current_setting('app.current_tenant_id')::uuid
-    ));
-```
-
-### 4. API レート制限
-- **FastAPI + slowapi**: 100リクエスト/分/ユーザー
-- **eBay API**: キャッシング戦略でコール数削減
-
----
-
-## 🎯 eBay API統合
-
-### 使用するAPI
-
-#### 1. Trading API (レガシーXML)
-**用途**: 出品物の詳細情報、View/Watch数取得
-
-```python
-# GetMyeBaySelling - アクティブ出品物一覧
-# GetItem - 個別商品詳細（View数、Watch数含む）
-
-headers = {
-    'X-EBAY-API-SITEID': '0',
-    'X-EBAY-API-COMPATIBILITY-LEVEL': '1193',
-    'X-EBAY-API-CALL-NAME': 'GetItem',
-    'X-EBAY-API-IAF-TOKEN': oauth_token,
-    'Content-Type': 'text/xml'
-}
-```
-
-#### 2. Inventory API (RESTful)
-**用途**: 在庫管理
-
-```python
-# GET /sell/inventory/v1/inventory_item
-headers = {
-    'Authorization': f'Bearer {access_token}',
-    'Content-Type': 'application/json'
-}
-```
-
-#### 3. Analytics API (RESTful)
-**用途**: トラフィックレポート、クリック率等
-
-```python
-# GET /sell/analytics/v1/traffic_report
-params = {
-    'dimension': 'LISTING',
-    'filter': f'startDate:[{start_date}],endDate:[{end_date}]',
-    'metric': 'CLICK_THROUGH_RATE,LISTING_IMPRESSION_TOTAL'
-}
-```
-
-#### 4. Feed API (RESTful)
-**用途**: バルクデータ取得（初回同期、月次同期）
-
-```python
-# POST /sell/feed/v1/inventory_task
-data = {
-    'feedType': 'LMS_ACTIVE_INVENTORY_REPORT',
-    'filterCriteria': {'listingStatus': ['ACTIVE']}
-}
-```
-
-### OAuth 2.0 フロー
-
-```python
-# 1. 認証URL生成
-auth_url = f"https://auth.ebay.com/oauth2/authorize?" \
-           f"client_id={CLIENT_ID}&" \
-           f"redirect_uri={REDIRECT_URI}&" \
-           f"response_type=code&" \
-           f"scope={SCOPES}"
-
-# 2. 認証コード交換
-response = requests.post(
-    "https://api.ebay.com/identity/v1/oauth2/token",
-    headers={'Authorization': f'Basic {base64_credentials}'},
-    data={
-        'grant_type': 'authorization_code',
-        'code': authorization_code,
-        'redirect_uri': REDIRECT_URI
-    }
-)
-
-# 3. トークンリフレッシュ
-response = requests.post(
-    "https://api.ebay.com/identity/v1/oauth2/token",
-    headers={'Authorization': f'Basic {base64_credentials}'},
-    data={
-        'grant_type': 'refresh_token',
-        'refresh_token': refresh_token,
-        'scope': SCOPES  # 元のスコープと同じ
-    }
-)
-```
-
-### 必要なスコープ
-```
-https://api.ebay.com/oauth/api_scope/sell.inventory
-https://api.ebay.com/oauth/api_scope/sell.inventory.readonly
-https://api.ebay.com/oauth/api_scope/sell.fulfillment
-https://api.ebay.com/oauth/api_scope/sell.analytics.readonly
-```
-
-**重要**: Trading API は特定のスコープ不要（任意のUser Access Tokenで使用可能）
-
----
-
-## 🔄 バックグラウンドジョブ
-
-### Celery Beat スケジュール
-
-```python
-# app/celery_app.py
-from celery.schedules import crontab
-
-beat_schedule = {
-    'daily-data-sync': {
-        'task': 'app.tasks.daily_sync.sync_all_accounts',
-        'schedule': crontab(hour=2, minute=0),  # 毎日午前2時
-    },
-    'daily-trend-analysis': {
-        'task': 'app.tasks.trend_analysis.analyze_all_trends',
-        'schedule': crontab(hour=3, minute=0),  # 毎日午前3時
-    },
-    'token-refresh': {
-        'task': 'app.tasks.token_refresh.refresh_expiring_tokens',
-        'schedule': crontab(minute=0),  # 1時間ごと
-    },
-    'cleanup': {
-        'task': 'app.tasks.cleanup.cleanup_old_data',
-        'schedule': crontab(day_of_week=0, hour=1, minute=0),  # 毎週日曜午前1時
-    },
-}
-```
-
-### タスク例
-
-```python
-# app/tasks/daily_sync.py
-from app.celery_app import celery
-
-@celery.task(bind=True, max_retries=3)
-def sync_account_data(self, account_id):
-    try:
-        service = eBayDataSyncService()
-        result = service.sync_active_listings(account_id)
-        return {'status': 'success', 'items': result.count}
-    except Exception as e:
-        self.retry(exc=e, countdown=60)
-```
-
----
-
-## 📊 トレンド分析ロジック
-
-### スコア計算式
-
+##### トレンドスコア計算ロジック
 ```python
 def calculate_trend_score(listing_id: str, date: date) -> float:
     """
     トレンドスコア算出
-    
+
     Score = (View成長率 × 0.4) + (Watch成長率 × 0.4) + (価格勢い × 0.2)
     """
     today_metrics = get_metrics(listing_id, date)
     yesterday_metrics = get_metrics(listing_id, date - timedelta(days=1))
-    
-    # 前日比成長率
-    view_growth = ((today_metrics.view_count - yesterday_metrics.view_count) 
-                   / yesterday_metrics.view_count * 100)
-    watch_growth = ((today_metrics.watch_count - yesterday_metrics.watch_count) 
-                    / yesterday_metrics.watch_count * 100)
-    
+
+    # 前日比成長率（ゼロ除算対策必要）
+    view_growth = calculate_growth_rate(
+        yesterday_metrics.view_count,
+        today_metrics.view_count
+    )
+    watch_growth = calculate_growth_rate(
+        yesterday_metrics.watch_count,
+        today_metrics.watch_count
+    )
+
     # 7日間移動平均
     week_avg = calculate_7day_average(listing_id, date)
-    
+
     # スコア計算
     trend_score = (
         view_growth * 0.4 +
         watch_growth * 0.4 +
         calculate_price_momentum(listing_id, date) * 0.2
     )
-    
+
     return trend_score
 ```
 
-### TOP10抽出
-
+##### TOP10抽出
 ```python
 def get_top_trending(account_id: str, date: date, limit: int = 10):
-    """
-    指定日のトレンドTOP10を取得
-    """
+    """指定日のトレンドTOP10を取得"""
     trends = (db.query(TrendAnalysis)
-              .filter(TrendAnalysis.analysis_date == date)
-              .filter(TrendAnalysis.account_id == account_id)
+              .join(Listing)
+              .filter(
+                  TrendAnalysis.analysis_date == date,
+                  Listing.account_id == account_id,
+                  TrendAnalysis.is_trending == True
+              )
               .order_by(TrendAnalysis.trend_score.desc())
               .limit(limit)
               .all())
-    
     return trends
 ```
 
----
-
-## 🎨 フロントエンド実装ガイド
-
-### Material-UI テーマ
-
-```typescript
-// src/theme/theme.ts
-import { createTheme } from '@mui/material/styles';
-
-export const theme = createTheme({
-  palette: {
-    primary: { main: '#1976d2' },
-    secondary: { main: '#dc004e' },
-    success: { main: '#2e7d32' },
-  },
-  typography: {
-    fontFamily: 'Roboto, Arial, sans-serif',
-  },
-  components: {
-    MuiButton: {
-      styleOverrides: {
-        root: { textTransform: 'none', borderRadius: 8 },
-      },
-    },
-  },
-});
-```
-
-### 主要コンポーネント例
-
-#### ダッシュボード KPIカード
-
-```typescript
-import { Card, CardContent, Typography, Box } from '@mui/material';
-import TrendingUpIcon from '@mui/icons-material/TrendingUp';
-
-export const KPICard = ({ title, value, change }) => (
-  <Card>
-    <CardContent>
-      <Typography color="textSecondary" gutterBottom>
-        {title}
-      </Typography>
-      <Typography variant="h4">{value}</Typography>
-      <Box display="flex" alignItems="center" mt={1}>
-        <TrendingUpIcon color="success" fontSize="small" />
-        <Typography variant="body2" color="success.main" ml={0.5}>
-          {change}%
-        </Typography>
-      </Box>
-    </CardContent>
-  </Card>
-);
-```
-
-#### トレンドリスト
-
-```typescript
-import { List, ListItem, ListItemAvatar, Avatar, ListItemText, Chip } from '@mui/material';
-
-export const TrendingList = ({ trends }) => (
-  <List>
-    {trends.map((trend, index) => (
-      <ListItem key={trend.id}>
-        <ListItemAvatar>
-          <Avatar src={trend.image_url} />
-        </ListItemAvatar>
-        <ListItemText
-          primary={trend.title}
-          secondary={`$${trend.price}`}
-        />
-        <Chip 
-          label={`+${trend.view_growth_rate}%`}
-          color="success"
-          size="small"
-        />
-      </ListItem>
-    ))}
-  </List>
-);
-```
-
-### Redux Store
-
-```typescript
-// src/store/trendsSlice.ts
-import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
-
-export const fetchTop10Trends = createAsyncThunk(
-  'trends/fetchTop10',
-  async (accountId: string) => {
-    const response = await api.get(`/trends/top10?account_id=${accountId}`);
-    return response.data;
-  }
-);
-
-const trendsSlice = createSlice({
-  name: 'trends',
-  initialState: { top10: [], loading: false, error: null },
-  reducers: {},
-  extraReducers: (builder) => {
-    builder
-      .addCase(fetchTop10Trends.pending, (state) => {
-        state.loading = true;
-      })
-      .addCase(fetchTop10Trends.fulfilled, (state, action) => {
-        state.top10 = action.payload;
-        state.loading = false;
-      });
-  },
-});
-```
-
----
-
-## 🐳 Docker環境
-
-### docker-compose.yml（簡略版）
-
-```yaml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:18-alpine
-    environment:
-      POSTGRES_DB: ebay_trends
-      POSTGRES_USER: ebayuser
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-
-  backend:
-    build: ./backend
-    ports:
-      - "8000:8000"
-    depends_on:
-      - postgres
-      - redis
-    environment:
-      DATABASE_URL: postgresql://ebayuser:${DATABASE_PASSWORD}@postgres:5432/ebay_trends
-      REDIS_URL: redis://redis:6379/0
-
-  celery-worker:
-    build: ./backend
-    command: celery -A app.celery_app worker --loglevel=info
-    depends_on:
-      - postgres
-      - redis
-
-  celery-beat:
-    build: ./backend
-    command: celery -A app.celery_app beat --loglevel=info
-    depends_on:
-      - redis
-
-  frontend:
-    build: ./frontend
-    ports:
-      - "3000:3000"
-    environment:
-      REACT_APP_API_URL: http://localhost:8000/api
-```
-
----
-
-## 📦 依存パッケージ
-
-### Backend (requirements.txt)
-
-```
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-sqlalchemy==2.0.25
-alembic==1.13.1
-psycopg2-binary==2.9.9
-redis==5.0.1
-celery==5.3.6
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-slowapi==0.1.9
-requests==2.31.0
-lxml==5.1.0
-cryptography==42.0.0
-```
-
-### Frontend (package.json)
-
-```json
-{
-  "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.0",
-    "@mui/material": "^5.15.0",
-    "@mui/icons-material": "^5.15.0",
-    "@emotion/react": "^11.11.0",
-    "@emotion/styled": "^11.11.0",
-    "@mui/x-data-grid": "^6.18.0",
-    "@mui/x-date-pickers": "^6.18.0",
-    "@reduxjs/toolkit": "^2.0.0",
-    "react-redux": "^9.0.0",
-    "axios": "^1.6.0",
-    "recharts": "^2.10.0"
-  }
+##### Celeryタスク（app/celery_app.py に追加）
+```python
+'daily-trend-analysis': {
+    'task': 'app.tasks.trend_analysis.analyze_all_trends',
+    'schedule': crontab(hour=3, minute=0),  # 毎日午前3時（データ同期の後）
 }
 ```
 
 ---
 
-## 🚀 開発の進め方（推奨順序）
+### 📅 Phase 6: ダッシュボード強化
 
-### Phase 1: 基盤構築 (1-2週間)
-1. ✅ プロジェクト骨格生成
-2. ✅ Docker環境構築
-3. ✅ データベースマイグレーション作成
-4. ✅ 基本的なFastAPIアプリケーション
-5. ✅ Reactアプリケーション雛形
+**実装が必要な機能:**
 
-### Phase 2: 認証システム (1週間)
-1. ✅ ユーザー登録・ログイン機能
-2. ✅ JWT発行・検証
-3. ✅ フロントエンドのログイン画面
+#### Backend
+1. **`backend/app/api/dashboard.py`** - ダッシュボードAPIエンドポイント
+   - `GET /api/dashboard/summary` - KPIサマリー
+   - `GET /api/dashboard/performance` - パフォーマンス推移
 
-### Phase 3: eBay OAuth連携 (1-2週間)
-1. ✅ OAuth 2.0フロー実装
-2. ✅ トークン暗号化・保存
-3. ✅ トークン自動リフレッシュ
-4. ✅ フロントエンドのアカウント連携UI
+#### Frontend
+1. **ダッシュボードのKPI表示を実データに接続**
+   - 現在はハードコード（0件）→ APIから取得
+2. **トレンドTOP10リスト表示**
+   - `components/dashboard/TrendingItemsList.tsx`
+3. **パフォーマンスグラフ**（Recharts使用）
+   - View数・Watch数の推移グラフ
+   - トレンドスコアの推移グラフ
 
-### Phase 4: データ同期 (2週間)
-1. ✅ Trading API クライアント実装
-2. ✅ 出品物データ取得
-3. ✅ daily_metrics テーブルへの保存
-4. ✅ Celeryタスク実装
-5. ✅ 手動同期トリガーAPI
+**実装例:**
+```typescript
+// frontend/src/pages/Dashboard.tsx での修正
+const Dashboard: React.FC = () => {
+  const [stats, setStats] = useState(null);
 
-### Phase 5: トレンド分析 (1-2週間)
-1. ✅ トレンドスコア計算ロジック
-2. ✅ TOP10抽出
-3. ✅ trend_analysis テーブルへの保存
-4. ✅ トレンド分析API
+  useEffect(() => {
+    // APIから実際のデータを取得
+    dashboardService.getSummary().then(setStats);
+  }, []);
 
-### Phase 6: ダッシュボード (2週間)
-1. ✅ ダッシュボードレイアウト
-2. ✅ KPIカード表示
-3. ✅ トレンドTOP10リスト
-4. ✅ パフォーマンスグラフ（Recharts）
-5. ✅ 商品詳細モーダル
-
-### Phase 7: 追加機能 (1-2週間)
-1. ✅ 通知機能
-2. ✅ Analytics API統合
-3. ✅ Feed API統合（バルク取得）
-4. ✅ レポート機能
-
-### Phase 8: テスト・最適化 (1週間)
-1. ✅ ユニットテスト
-2. ✅ 統合テスト
-3. ✅ パフォーマンスチューニング
-4. ✅ バグ修正
+  return (
+    // KPIカードに実データを表示
+    <Typography variant="h3" color="primary">
+      {stats?.active_listings || 0}
+    </Typography>
+  );
+};
+```
 
 ---
 
-## ⚠️ 重要な実装ポイント
+### 📅 Phase 7: 追加機能
 
-### 1. セキュリティ
-- ❗ **絶対にトークンを平文で保存しない**
-- ❗ **環境変数で秘密情報を管理**
-- ❗ **SQLインジェクション対策（ORMの適切な使用）**
-- ❗ **CORS設定を適切に**
+**オプション実装:**
 
-### 2. eBay API制限
-- ❗ **1日5,000コールの制限**（標準アカウント）
-- ❗ **キャッシング戦略必須**
-- ❗ **リトライロジック実装**
-- ❗ **レート制限エラーハンドリング**
+1. **通知機能**
+   - トレンド商品検出時のメール通知
+   - `backend/app/services/notification_service.py`
 
-### 3. データ整合性
-- ❗ **トランザクション管理**
-- ❗ **定期的な完全再同期**
-- ❗ **エラー時のロールバック**
+2. **Analytics API統合**
+   - `backend/app/clients/analytics_api_client.py`
+   - トラフィックレポートの取得
 
-### 4. パフォーマンス
-- ❗ **Redisキャッシング活用**
-- ❗ **データベースインデックス最適化**
-- ❗ **N+1問題の回避**
-- ❗ **ページネーション実装**
+3. **Feed API統合**（バルクデータ取得）
+   - `backend/app/clients/feed_api_client.py`
+   - 初回同期の高速化
+
+4. **レート制限機能**
+   - `backend/app/utils/rate_limiter.py`
+   - eBay API コール数管理
 
 ---
 
-## 🐛 トラブルシューティング
+## ⚠️ 重要な実装上の注意
 
-### eBay API関連
+### 1. モックモードから本番モードへの移行
 
-#### 問題: `invalid_grant` エラー
-**原因**: リフレッシュトークンが無効化された
-**解決策**: ユーザーに再度OAuth認証を実行してもらう
+**現在の状態:**
+- `EBAY_MOCK_MODE=true` でモックデータを使用中
+- Trading APIクライアントは実装済みだが、実際のeBay APIは未テスト
 
-#### 問題: レート制限エラー
-**原因**: API呼び出し上限超過
-**解決策**: キャッシング、バッチ処理、Feed API活用
+**本番移行時のチェックリスト:**
+1. ✅ eBay Developer Accountから Client ID/Secret を取得
+2. ✅ `.env` に `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET` を設定
+3. ✅ `EBAY_MOCK_MODE=false` に変更
+4. ✅ OAuth フローの動作確認
+5. ✅ Trading API での実データ取得テスト
+6. ✅ エラーハンドリングの確認（レート制限、トークン失効等）
 
-### データベース関連
+### 2. eBay API制限への対応
 
-#### 問題: 接続エラー
-**原因**: PostgreSQL未起動 or 接続情報誤り
-**解決策**: `docker-compose up postgres` 確認、DATABASE_URL検証
+**標準アカウントの制限:**
+- **1日5,000コール**まで
+- 2,000件の商品 × GetItem = 2,000コール/日
+- GetMyeBaySelling（ページネーション）= 約10コール/日
+- **合計: 約2,010コール/日**（制限内）
 
-### Celery関連
+**制限を超える場合の対策:**
+1. Redisキャッシング（同じ日に2回以上取得しない）
+2. Feed APIでバルク取得（1タスクで全件取得）
+3. eBayに申請して上限を拡大
 
-#### 問題: タスクが実行されない
-**原因**: Celery Worker未起動 or Redis接続失敗
-**解決策**: `docker-compose logs celery-worker` でログ確認
+### 3. データ整合性とエラー処理
+
+**必須対応:**
+
+#### ゼロ除算対策
+```python
+def calculate_growth_rate(old_value: int, new_value: int) -> float:
+    """成長率計算（ゼロ除算対策）"""
+    if old_value == 0:
+        return 100.0 if new_value > 0 else 0.0
+    return ((new_value - old_value) / old_value) * 100
+```
+
+#### 欠損データ対策
+```python
+# 前日のメトリクスがない場合
+if not yesterday_metrics:
+    # 初日のデータ or データ欠損
+    # トレンドスコアは計算できないため、0を返すかスキップ
+    return 0.0
+```
+
+#### トランザクション管理
+```python
+@celery.task
+def sync_account_data(account_id):
+    try:
+        # データベーストランザクション
+        with db.begin():
+            # 同期処理
+            service.sync_listings(account_id)
+    except Exception as e:
+        # ロールバック（自動）
+        logger.error(f"Sync failed: {e}")
+        raise
+```
+
+### 4. パフォーマンス最適化
+
+**実装済み:**
+- ✅ データベースインデックス（listings, daily_metrics）
+- ✅ ユニーク制約（重複データ防止）
+- ✅ Celeryバックグラウンドジョブ
+
+**要対応:**
+- ⏳ N+1問題の回避（join使用、eager loading）
+- ⏳ ページネーション（リスティング一覧API）
+- ⏳ Redisキャッシング（APIレスポンス）
+
+**実装例:**
+```python
+# N+1問題の回避
+listings = db.query(Listing).options(
+    joinedload(Listing.daily_metrics)
+).filter(Listing.account_id == account_id).all()
+```
+
+---
+
+## 🔐 セキュリティチェックリスト
+
+### 本番環境デプロイ前
+
+- [ ] `.env`ファイルがgitignoreされている（✅完了）
+- [ ] SECRET_KEY が強力なランダム文字列（32文字以上）
+- [ ] ENCRYPTION_KEY が適切に生成されている（base64エンコード32バイト）
+- [ ] データベースパスワードが強力
+- [ ] CORS設定が本番ドメインのみ許可
+- [ ] PostgreSQL Row Level Security (RLS) 有効化
+- [ ] HTTPS使用（本番環境）
+- [ ] eBay本番環境の認証情報使用
+
+### コードレビュー項目
+
+- [ ] SQLインジェクション対策（ORMパラメータバインド使用）
+- [ ] XSS対策（フロントエンドでのエスケープ）
+- [ ] CSRF対策（OAuth stateパラメータ検証済み）
+- [ ] 認証トークンの適切な保存（localStorage使用中）
+- [ ] パスワード平文保存なし（bcrypt使用中）
+- [ ] OAuth トークン暗号化（AES-256-GCM使用中）
+
+---
+
+## 📊 データベーススキーマ（trend_analysis追加予定）
+
+### trend_analysis テーブル（Phase 5で追加）
+
+```sql
+CREATE TABLE trend_analysis (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    listing_id UUID NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
+    analysis_date DATE NOT NULL,
+
+    -- 成長率
+    view_growth_rate DECIMAL(8, 2),      -- View数成長率（%）
+    watch_growth_rate DECIMAL(8, 2),     -- Watch数成長率（%）
+
+    -- 移動平均
+    view_7day_avg DECIMAL(10, 2),        -- View数7日間移動平均
+    watch_7day_avg DECIMAL(10, 2),       -- Watch数7日間移動平均
+
+    -- トレンドスコア
+    trend_score DECIMAL(10, 2) NOT NULL, -- 総合スコア
+    rank INTEGER,                        -- アカウント内順位
+    is_trending BOOLEAN DEFAULT false,   -- TOP10フラグ
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(listing_id, analysis_date)
+);
+
+-- インデックス
+CREATE INDEX idx_trend_analysis_date ON trend_analysis(analysis_date);
+CREATE INDEX idx_trend_analysis_score ON trend_analysis(trend_score DESC);
+CREATE INDEX idx_trend_analysis_trending ON trend_analysis(is_trending, analysis_date);
+```
+
+---
+
+## 🐛 既知の問題と対処法
+
+### 1. bcrypt警告メッセージ
+
+**問題:**
+```
+(trapped) error reading bcrypt version
+AttributeError: module 'bcrypt' has no attribute '__about__'
+```
+
+**対処:**
+- 警告のみで動作に影響なし
+- passlibがbcryptバージョンを読み取れないだけ
+- 必要であれば `bcrypt==4.1.2` を維持
+
+### 2. Docker Compose警告
+
+**問題:**
+```
+the attribute `version` is obsolete
+```
+
+**対処:**
+- Docker Compose v2の警告（動作に影響なし）
+- 必要であれば `docker-compose.yml` から `version: '3.8'` を削除
+
+---
+
+## 🚀 開発再開時のクイックスタート
+
+### 環境の起動
+
+```bash
+# すべてのサービスを起動
+docker-compose up -d
+
+# ログ確認
+docker-compose logs -f backend
+
+# データベースマイグレーション適用
+docker-compose exec backend alembic upgrade head
+```
+
+### モックモードでのテスト
+
+```bash
+# .envファイルで確認
+EBAY_MOCK_MODE=true
+
+# テスト用ユーザーでログイン
+# Email: test@example.com
+# Password: Test1234
+
+# 同期テスト（モックデータ生成）
+curl -X POST http://localhost:8000/api/sync/trigger \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 次のタスク: Phase 5実装
+
+1. TrendAnalysisモデル作成
+2. トレンド分析サービス実装
+3. Celeryタスク追加
+4. APIエンドポイント作成
+5. フロントエンドUI実装
 
 ---
 
 ## 📚 参考リソース
 
-### eBay API ドキュメント
+### eBay API
 - [eBay Developer Program](https://developer.ebay.com/)
-- [OAuth 2.0 Guide](https://developer.ebay.com/api-docs/static/oauth-tokens.html)
 - [Trading API Reference](https://developer.ebay.com/Devzone/XML/docs/Reference/eBay/index.html)
-- [Analytics API](https://developer.ebay.com/api-docs/sell/analytics/overview.html)
+- [OAuth 2.0 Guide](https://developer.ebay.com/api-docs/static/oauth-tokens.html)
 
 ### 技術ドキュメント
-- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [FastAPI](https://fastapi.tiangolo.com/)
 - [Material-UI](https://mui.com/)
-- [SQLAlchemy](https://www.sqlalchemy.org/)
+- [Recharts](https://recharts.org/)
 - [Celery](https://docs.celeryq.dev/)
+- [SQLAlchemy](https://www.sqlalchemy.org/)
+
+### プロジェクト内ドキュメント
+- `README.md` - セットアップとクイックスタート
+- `.serena/memories/` - コードベース構造のドキュメント
+  - `project_structure.md` - プロジェクト全体構造
+  - `backend_models_overview.md` - バックエンドモデル詳細
+  - `backend_services_overview.md` - サービス層詳細
+  - `frontend_architecture.md` - フロントエンド構造
+  - `api_contracts.md` - API仕様
+  - `ebay_api_integration_guide.md` - eBay API統合ガイド
+  - `development_workflow.md` - 開発ワークフロー
 
 ---
 
@@ -955,48 +421,25 @@ cryptography==42.0.0
 ### Claude Codeでの効率的な開発
 
 1. **段階的な実装**
-   - 小さな機能から始める
-   - 動作確認しながら進める
-   - コミットを細かく
+   - Phase 5を小さなタスクに分解
+   - 各タスクを完了後にテスト
+   - 動作確認後にコミット
 
-2. **エラーハンドリング**
-   - try-exceptを適切に配置
-   - ログを詳細に出力
+2. **モック活用**
+   - eBay APIなしで開発継続可能
+   - テストデータで動作確認
+   - 本番API接続は最後
+
+3. **エラーハンドリング**
+   - ゼロ除算、NULL値、欠損データを考慮
    - ユーザーフレンドリーなエラーメッセージ
-
-3. **テスト**
-   - 各機能の実装後にテスト作成
-   - モックを活用（eBay APIなど）
-   - エッジケースも考慮
+   - ログで詳細を記録
 
 4. **コード品質**
-   - 型ヒント（Python）、TypeScript（Frontend）
-   - docstringを書く
-   - コメントは「なぜ」を説明
+   - 型ヒント必須（Python、TypeScript）
+   - Docstring記述
+   - 一貫したコーディングスタイル
 
 ---
-
-## 🎯 成功の指標
-
-### 開発完了の定義
-- ✅ ユーザーがeBayアカウントを連携できる
-- ✅ 出品物データが自動収集される
-- ✅ トレンドTOP10が正確に表示される
-- ✅ ダッシュボードでパフォーマンスが可視化される
-- ✅ 2,000件の商品を問題なく処理できる
-- ✅ エラーハンドリングが適切
-
-### パフォーマンス目標
-- ダッシュボード表示: 2秒以内
-- API応答時間: 1秒以内（95パーセンタイル）
-- 2,000件の同期: 30分以内
-
----
-
-## 📝 最後に
-
-このプロジェクトは段階的に実装していくことが重要です。焦らず、各フェーズを確実に完成させてから次に進んでください。
-
-質問や不明点があれば、このCLAUDE.mdを参照しながら開発を進めてください。
 
 **Happy Coding! 🚀**
