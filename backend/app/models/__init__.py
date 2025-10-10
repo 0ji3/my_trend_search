@@ -7,6 +7,7 @@ from app.models.ebay_account import EbayAccount
 from app.models.listing import Listing
 from app.models.daily_metric import DailyMetric
 from app.models.trend_analysis import TrendAnalysis
+from app.models.analytics_metric import AnalyticsMetric
 
 __all__ = [
     "Tenant",
@@ -16,4 +17,5 @@ __all__ = [
     "Listing",
     "DailyMetric",
     "TrendAnalysis",
+    "AnalyticsMetric",
 ]

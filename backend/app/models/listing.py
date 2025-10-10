@@ -75,6 +75,12 @@ class Listing(Base):
         cascade="all, delete-orphan",
         order_by="TrendAnalysis.analysis_date.desc()"
     )
+    analytics_metrics = relationship(
+        "AnalyticsMetric",
+        back_populates="listing",
+        cascade="all, delete-orphan",
+        order_by="AnalyticsMetric.recorded_date.desc()"
+    )
 
     # Indexes for performance
     __table_args__ = (

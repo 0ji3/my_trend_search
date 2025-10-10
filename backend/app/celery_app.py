@@ -53,6 +53,13 @@ celery.conf.beat_schedule = {
             'expires': 3600,  # Task expires after 1 hour if not executed
         },
     },
+    'daily-analytics-sync': {
+        'task': 'app.tasks.analytics_sync.sync_all_analytics',
+        'schedule': crontab(hour=2, minute=30),  # Every day at 2:30 AM UTC (after data sync, before trend analysis)
+        'options': {
+            'expires': 3600,  # Task expires after 1 hour if not executed
+        },
+    },
 }
 
 @celery.task(bind=True)
