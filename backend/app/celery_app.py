@@ -46,11 +46,13 @@ celery.conf.beat_schedule = {
             'expires': 1800,  # Task expires after 30 minutes
         },
     },
-    # Future tasks can be added here:
-    # 'daily-trend-analysis': {
-    #     'task': 'app.tasks.trend_analysis.analyze_all_trends',
-    #     'schedule': crontab(hour=3, minute=0),  # Every day at 3:00 AM UTC
-    # },
+    'daily-trend-analysis': {
+        'task': 'app.tasks.trend_analysis.analyze_all_trends',
+        'schedule': crontab(hour=3, minute=0),  # Every day at 3:00 AM UTC (after data sync)
+        'options': {
+            'expires': 3600,  # Task expires after 1 hour if not executed
+        },
+    },
 }
 
 @celery.task(bind=True)

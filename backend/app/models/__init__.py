@@ -6,6 +6,7 @@ from app.models.oauth_credential import OAuthCredential
 from app.models.ebay_account import EbayAccount
 from app.models.listing import Listing
 from app.models.daily_metric import DailyMetric
+from app.models.trend_analysis import TrendAnalysis
 
 __all__ = [
     "Tenant",
@@ -14,4 +15,5 @@ __all__ = [
     "EbayAccount",
     "Listing",
     "DailyMetric",
+    "TrendAnalysis",
 ]
