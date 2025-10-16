@@ -15,7 +15,7 @@ class OAuthCredential(Base):
     OAuth Credential model - stores encrypted eBay OAuth tokens
 
     Tokens are encrypted using AES-256-GCM before storage.
-    Each tenant can have only one OAuth credential (enforced by unique constraint).
+    Each tenant can have multiple OAuth credentials (one per eBay account).
     """
     __tablename__ = "oauth_credentials"
 
@@ -24,8 +24,7 @@ class OAuthCredential(Base):
         UUID(as_uuid=True),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
-        unique=True,  # One OAuth credential per tenant
-        index=True
+        index=True  # Multiple OAuth credentials per tenant (for multi-account support)
     )
 
     # Encrypted access token (AES-256-GCM)

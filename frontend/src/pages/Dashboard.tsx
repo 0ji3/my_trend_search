@@ -18,10 +18,13 @@ import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
 import { logout } from '../store/authSlice';
 import EbayConnection from '../components/ebay/EbayConnection';
+import AccountSwitcher from '../components/dashboard/AccountSwitcher';
 import TrendingItemsList from '../components/dashboard/TrendingItemsList';
 import PerformanceChart from '../components/dashboard/PerformanceChart';
 import dashboardService, { DashboardSummary, DashboardPerformance } from '../services/dashboard.service';
 import trendsService, { TrendAnalysis } from '../services/trends.service';
+import ebayService from '../services/ebay.service';
+import { EbayAccount } from '../types';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import RemoveRedEyeIcon from '@mui/icons-material/RemoveRedEye';
@@ -37,21 +40,36 @@ const Dashboard: React.FC = () => {
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [performance, setPerformance] = useState<DashboardPerformance | null>(null);
   const [topTrending, setTopTrending] = useState<TrendAnalysis[]>([]);
+  const [accounts, setAccounts] = useState<EbayAccount[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
+
+  useEffect(() => {
+    loadAccounts();
+  }, []);
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [selectedAccountId]);
+
+  const loadAccounts = async () => {
+    try {
+      const accountsData = await ebayService.getAccounts();
+      setAccounts(accountsData);
+    } catch (err: any) {
+      console.error('Failed to load accounts:', err);
+    }
+  };
 
   const loadDashboardData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // 並列でデータを取得
+      // 並列でデータを取得（アカウントIDパラメータ付き）
       const [summaryData, performanceData, trendsData] = await Promise.all([
-        dashboardService.getSummary(),
-        dashboardService.getPerformance(7),
-        trendsService.getTopTrending(10)
+        dashboardService.getSummary(selectedAccountId),
+        dashboardService.getPerformance(7, selectedAccountId),
+        trendsService.getTopTrending(10, selectedAccountId)
       ]);
 
       setSummary(summaryData);
@@ -63,6 +81,10 @@ const Dashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAccountChange = (accountId: string | null) => {
+    setSelectedAccountId(accountId);
   };
 
   const handleLogout = async () => {
@@ -104,6 +126,15 @@ const Dashboard: React.FC = () => {
           <Alert severity="error" sx={{ mb: 3 }}>
             {error}
           </Alert>
+        )}
+
+        {/* Account Switcher */}
+        {accounts.length > 0 && (
+          <AccountSwitcher
+            accounts={accounts}
+            selectedAccountId={selectedAccountId}
+            onAccountChange={handleAccountChange}
+          />
         )}
 
         {/* KPI Cards */}

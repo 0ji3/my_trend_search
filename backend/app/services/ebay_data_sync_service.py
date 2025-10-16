@@ -5,12 +5,15 @@ Handles syncing listing data and metrics from eBay
 import logging
 from typing import Dict, Any, List
 from datetime import datetime, date
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
 from app.models import EbayAccount, Listing, DailyMetric
 from app.clients.trading_api_client import TradingAPIClient
 from app.services.ebay_oauth_service import EbayOAuthService
+from app.services.rate_limiter import RateLimiter
+from app.services.cache_service import CacheService
+from app.clients.ebay_client_base import EbayRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +33,8 @@ class EbayDataSyncService:
         self.db = db
         self.oauth_service = EbayOAuthService()
         self.trading_client = TradingAPIClient()
+        self.rate_limiter = RateLimiter()
+        self.cache_service = CacheService()
 
     async def sync_account_listings(self, account: EbayAccount) -> Dict[str, Any]:
         """
@@ -56,6 +61,18 @@ class EbayDataSyncService:
         """
         logger.info(f"Starting sync for account {account.id} (eBay User: {account.ebay_user_id})")
 
+        # Check if already synced today
+        if self.cache_service.is_synced_today(str(account.id), "trading"):
+            logger.info(f"Account {account.id} already synced today, skipping")
+            return {
+                'account_id': str(account.id),
+                'items_synced': 0,
+                'items_failed': 0,
+                'sync_time': account.last_sync_at,
+                'errors': [],
+                'cached': True
+            }
+
         errors = []
         synced_count = 0
         failed_count = 0
@@ -68,7 +85,7 @@ class EbayDataSyncService:
             )
 
             # Fetch all active item IDs (paginated)
-            all_items = await self._fetch_all_active_items(access_token)
+            all_items = await self._fetch_all_active_items(access_token, account.tenant_id)
             logger.info(f"Found {len(all_items)} active items for account {account.id}")
 
             # Sync each item
@@ -100,6 +117,9 @@ class EbayDataSyncService:
             account.last_sync_at = datetime.utcnow()
             self.db.commit()
 
+            # Mark as synced today
+            self.cache_service.mark_synced_today(str(account.id), "trading")
+
             logger.info(
                 f"Sync completed for account {account.id}: "
                 f"{synced_count} succeeded, {failed_count} failed"
@@ -111,6 +131,7 @@ class EbayDataSyncService:
                 'items_failed': failed_count,
                 'sync_time': account.last_sync_at,
                 'errors': errors[:10],  # Limit to first 10 errors
+                'cached': False
             }
 
         except Exception as e:
@@ -126,12 +147,13 @@ class EbayDataSyncService:
                 'errors': errors,
             }
 
-    async def _fetch_all_active_items(self, access_token: str) -> List[Dict[str, Any]]:
+    async def _fetch_all_active_items(self, access_token: str, tenant_id: str) -> List[Dict[str, Any]]:
         """
         Fetch all active item IDs using paginated GetMyeBaySelling
 
         Args:
             access_token: OAuth access token
+            tenant_id: Tenant ID for rate limiting
 
         Returns:
             List of {'item_id': str, 'title': str}
@@ -141,11 +163,19 @@ class EbayDataSyncService:
         entries_per_page = 200
 
         while True:
+            # Check rate limit before API call
+            if not self.rate_limiter.check_rate_limit(str(tenant_id), "trading", 1):
+                raise EbayRateLimitError("Trading API rate limit reached for today")
+
+            # Make API call
             result = self.trading_client.get_my_ebay_selling(
                 access_token,
                 page_number=page,
                 entries_per_page=entries_per_page
             )
+
+            # Record API call
+            self.rate_limiter.record_api_call(str(tenant_id), "trading", 1)
 
             all_items.extend(result['items'])
 
@@ -279,7 +309,11 @@ class EbayDataSyncService:
         Returns:
             List of sync results for each account
         """
-        accounts = self.db.query(EbayAccount).filter(
+        # Use joinedload to prevent N+1 queries
+        accounts = self.db.query(EbayAccount).options(
+            joinedload(EbayAccount.oauth_credential),
+            joinedload(EbayAccount.tenant)
+        ).filter(
             EbayAccount.is_active == True
         ).all()
 

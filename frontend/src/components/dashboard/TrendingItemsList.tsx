@@ -114,7 +114,7 @@ const TrendingItemsList: React.FC<TrendingItemsListProps> = ({ trends, loading =
               secondary={
                 <Box sx={{ mt: 0.5 }}>
                   <Typography variant="body2" color="text.secondary" component="span">
-                    {trend.currency} {trend.price?.toFixed(2) || 'N/A'}
+                    {trend.currency} {trend.price ? Number(trend.price).toFixed(2) : 'N/A'}
                   </Typography>
                   {trend.category_name && (
                     <Typography
@@ -131,19 +131,19 @@ const TrendingItemsList: React.FC<TrendingItemsListProps> = ({ trends, loading =
             />
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, minWidth: 120 }}>
               <Chip
-                label={`スコア: ${trend.trend_score.toFixed(1)}`}
+                label={`スコア: ${Number(trend.trend_score).toFixed(1)}`}
                 size="small"
                 color="success"
                 sx={{ fontWeight: 600 }}
               />
-              {trend.view_growth_rate !== null && (
+              {trend.view_growth_rate !== null && trend.view_growth_rate !== undefined && (
                 <Typography variant="caption" color="text.secondary">
-                  View: +{trend.view_growth_rate.toFixed(1)}%
+                  View: +{Number(trend.view_growth_rate).toFixed(1)}%
                 </Typography>
               )}
-              {trend.watch_growth_rate !== null && (
+              {trend.watch_growth_rate !== null && trend.watch_growth_rate !== undefined && (
                 <Typography variant="caption" color="text.secondary">
-                  Watch: +{trend.watch_growth_rate.toFixed(1)}%
+                  Watch: +{Number(trend.watch_growth_rate).toFixed(1)}%
                 </Typography>
               )}
             </Box>

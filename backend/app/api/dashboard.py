@@ -23,6 +23,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/summary", response_model=DashboardSummaryResponse)
 def get_dashboard_summary(
+    account_id: str = Query(None, description="特定アカウントのみ取得（未指定の場合は全アカウント）"),
     current_tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
@@ -36,9 +37,9 @@ def get_dashboard_summary(
     - 接続済みアカウント数
     """
     service = DashboardService(db)
-    summary = service.get_summary(current_tenant)
+    summary = service.get_summary(current_tenant, account_id=account_id)
 
-    logger.info(f"Dashboard summary fetched for tenant {current_tenant.id}")
+    logger.info(f"Dashboard summary fetched for tenant {current_tenant.id}, account: {account_id or 'all'}")
 
     return DashboardSummaryResponse(**summary)
 
@@ -46,6 +47,7 @@ def get_dashboard_summary(
 @router.get("/performance", response_model=DashboardPerformanceResponse)
 def get_dashboard_performance(
     days: int = Query(default=7, ge=1, le=30, description="取得日数（1-30日）"),
+    account_id: str = Query(None, description="特定アカウントのみ取得（未指定の場合は全アカウント）"),
     current_tenant: Tenant = Depends(get_current_tenant),
     db: Session = Depends(get_db)
 ):
@@ -58,9 +60,9 @@ def get_dashboard_performance(
     - 日別トレンド商品数
     """
     service = DashboardService(db)
-    performance = service.get_performance(current_tenant, days)
+    performance = service.get_performance(current_tenant, days, account_id=account_id)
 
-    logger.info(f"Dashboard performance fetched for tenant {current_tenant.id} ({days} days)")
+    logger.info(f"Dashboard performance fetched for tenant {current_tenant.id} ({days} days), account: {account_id or 'all'}")
 
     return DashboardPerformanceResponse(**performance)
 

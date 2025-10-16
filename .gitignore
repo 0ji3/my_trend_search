@@ -3,6 +3,9 @@
 .env.local
 .env.development
 .env.production
+.env.dev
+.env.backup.*
+!.env.template
 
 # Python
 __pycache__/
@@ -68,6 +71,9 @@ frontend/.env.production.local
 # Claude Code and Serena
 .claude/
 .serena/
+
+# Documentation with sensitive info
+CLAUDE.md
 
 # Docker
 *.log

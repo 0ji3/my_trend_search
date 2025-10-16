@@ -33,6 +33,7 @@ class EbayOAuthService:
         "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
         "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
+        "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",  # For Commerce Identity API
     ]
 
     def __init__(self):
@@ -83,6 +84,8 @@ class EbayOAuthService:
         authorization_url = f"{self.auth_url}?{param_str}"
 
         logger.info(f"Generated eBay authorization URL with state: {state}")
+        logger.info(f"OAuth Parameters: client_id={self.client_id[:50]}..., redirect_uri={self.redirect_uri}, scopes={len(self.REQUIRED_SCOPES)} scopes")
+        logger.info(f"Full Authorization URL: {authorization_url[:200]}...")
 
         return authorization_url, state
 
@@ -212,6 +215,9 @@ class EbayOAuthService:
         """
         Save OAuth credentials to database (encrypted)
 
+        For multi-account support, always creates a new credential.
+        Each eBay account has its own access token, so each needs a separate credential.
+
         Args:
             db: Database session
             tenant: Tenant object
@@ -221,7 +227,7 @@ class EbayOAuthService:
             refresh_token_expires_in: Refresh token expiration (seconds)
 
         Returns:
-            OAuthCredential: Created or updated credential
+            OAuthCredential: Created credential
         """
         # Encrypt tokens
         encrypted_data = encrypt_oauth_tokens(access_token, refresh_token)
@@ -230,44 +236,23 @@ class EbayOAuthService:
         access_token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
         refresh_token_expires_at = datetime.utcnow() + timedelta(seconds=refresh_token_expires_in)
 
-        # Check if credential already exists
-        credential = db.query(OAuthCredential).filter(
-            OAuthCredential.tenant_id == tenant.id
-        ).first()
+        # Always create new credential for multi-account support
+        credential = OAuthCredential(
+            tenant_id=tenant.id,
+            access_token_encrypted=encrypted_data['access_token_encrypted'],
+            access_token_iv=encrypted_data['access_token_iv'],
+            access_token_auth_tag=encrypted_data['access_token_auth_tag'],
+            refresh_token_encrypted=encrypted_data['refresh_token_encrypted'],
+            refresh_token_iv=encrypted_data['refresh_token_iv'],
+            refresh_token_auth_tag=encrypted_data['refresh_token_auth_tag'],
+            access_token_expires_at=access_token_expires_at,
+            refresh_token_expires_at=refresh_token_expires_at,
+            scopes=self.REQUIRED_SCOPES,
+            is_valid=True,
+        )
+        db.add(credential)
 
-        if credential:
-            # Update existing credential
-            credential.access_token_encrypted = encrypted_data['access_token_encrypted']
-            credential.access_token_iv = encrypted_data['access_token_iv']
-            credential.access_token_auth_tag = encrypted_data['access_token_auth_tag']
-            credential.refresh_token_encrypted = encrypted_data['refresh_token_encrypted']
-            credential.refresh_token_iv = encrypted_data['refresh_token_iv']
-            credential.refresh_token_auth_tag = encrypted_data['refresh_token_auth_tag']
-            credential.access_token_expires_at = access_token_expires_at
-            credential.refresh_token_expires_at = refresh_token_expires_at
-            credential.scopes = self.REQUIRED_SCOPES
-            credential.is_valid = True
-            credential.updated_at = datetime.utcnow()
-
-            logger.info(f"Updated OAuth credentials for tenant: {tenant.id}")
-        else:
-            # Create new credential
-            credential = OAuthCredential(
-                tenant_id=tenant.id,
-                access_token_encrypted=encrypted_data['access_token_encrypted'],
-                access_token_iv=encrypted_data['access_token_iv'],
-                access_token_auth_tag=encrypted_data['access_token_auth_tag'],
-                refresh_token_encrypted=encrypted_data['refresh_token_encrypted'],
-                refresh_token_iv=encrypted_data['refresh_token_iv'],
-                refresh_token_auth_tag=encrypted_data['refresh_token_auth_tag'],
-                access_token_expires_at=access_token_expires_at,
-                refresh_token_expires_at=refresh_token_expires_at,
-                scopes=self.REQUIRED_SCOPES,
-                is_valid=True,
-            )
-            db.add(credential)
-
-            logger.info(f"Created OAuth credentials for tenant: {tenant.id}")
+        logger.info(f"Created new OAuth credential for tenant: {tenant.id}")
 
         db.commit()
         db.refresh(credential)
@@ -349,7 +334,7 @@ class EbayOAuthService:
 
     def delete_oauth_credentials(self, db: Session, tenant: Tenant) -> bool:
         """
-        Delete OAuth credentials for tenant
+        Delete all OAuth credentials for tenant
 
         Args:
             db: Database session
@@ -358,16 +343,18 @@ class EbayOAuthService:
         Returns:
             bool: True if deleted, False if not found
         """
-        credential = db.query(OAuthCredential).filter(
+        credentials = db.query(OAuthCredential).filter(
             OAuthCredential.tenant_id == tenant.id
-        ).first()
+        ).all()
 
-        if not credential:
+        if not credentials:
             return False
 
-        db.delete(credential)
+        for credential in credentials:
+            db.delete(credential)
+
         db.commit()
 
-        logger.info(f"Deleted OAuth credentials for tenant: {tenant.id}")
+        logger.info(f"Deleted {len(credentials)} OAuth credential(s) for tenant: {tenant.id}")
 
         return True

@@ -24,12 +24,13 @@ class DashboardService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_summary(self, tenant: Tenant) -> Dict[str, Any]:
+    def get_summary(self, tenant: Tenant, account_id: str = None) -> Dict[str, Any]:
         """
         KPIサマリーを取得
 
         Args:
             tenant: テナント
+            account_id: 特定アカウントのみ取得（Noneの場合は全アカウント）
 
         Returns:
             dict: {
@@ -43,11 +44,16 @@ class DashboardService:
         """
         today = date.today()
 
-        # テナントのアカウント一覧を取得
-        account_ids = self.db.query(EbayAccount.id).filter(
+        # テナントのアカウント一覧を取得（account_idが指定されている場合はフィルタリング）
+        query = self.db.query(EbayAccount.id).filter(
             EbayAccount.tenant_id == tenant.id,
             EbayAccount.is_active == True
-        ).all()
+        )
+
+        if account_id:
+            query = query.filter(EbayAccount.id == account_id)
+
+        account_ids = query.all()
         account_ids = [acc[0] for acc in account_ids]
 
         if not account_ids:
@@ -113,7 +119,8 @@ class DashboardService:
     def get_performance(
         self,
         tenant: Tenant,
-        days: int = 7
+        days: int = 7,
+        account_id: str = None
     ) -> Dict[str, Any]:
         """
         パフォーマンス推移を取得（過去N日間）
@@ -121,6 +128,7 @@ class DashboardService:
         Args:
             tenant: テナント
             days: 取得日数（デフォルト7日間）
+            account_id: 特定アカウントのみ取得（Noneの場合は全アカウント）
 
         Returns:
             dict: {
@@ -134,11 +142,16 @@ class DashboardService:
         end_date = date.today()
         start_date = end_date - timedelta(days=days - 1)
 
-        # テナントのアカウント一覧を取得
-        account_ids = self.db.query(EbayAccount.id).filter(
+        # テナントのアカウント一覧を取得（account_idが指定されている場合はフィルタリング）
+        query = self.db.query(EbayAccount.id).filter(
             EbayAccount.tenant_id == tenant.id,
             EbayAccount.is_active == True
-        ).all()
+        )
+
+        if account_id:
+            query = query.filter(EbayAccount.id == account_id)
+
+        account_ids = query.all()
         account_ids = [acc[0] for acc in account_ids]
 
         if not account_ids:

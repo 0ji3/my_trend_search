@@ -34,19 +34,26 @@ export interface RecentActivity {
 const dashboardService = {
   /**
    * ダッシュボードサマリーを取得
+   * @param accountId アカウントID（nullの場合は全アカウント）
    */
-  getSummary: async (): Promise<DashboardSummary> => {
-    const response = await api.get<DashboardSummary>('/dashboard/summary');
+  getSummary: async (accountId: string | null = null): Promise<DashboardSummary> => {
+    const response = await api.get<DashboardSummary>('/dashboard/summary', {
+      params: accountId ? { account_id: accountId } : {}
+    });
     return response.data;
   },
 
   /**
    * パフォーマンス推移を取得
    * @param days 取得日数（デフォルト7日間）
+   * @param accountId アカウントID（nullの場合は全アカウント）
    */
-  getPerformance: async (days: number = 7): Promise<DashboardPerformance> => {
+  getPerformance: async (days: number = 7, accountId: string | null = null): Promise<DashboardPerformance> => {
     const response = await api.get<DashboardPerformance>('/dashboard/performance', {
-      params: { days }
+      params: {
+        days,
+        ...(accountId && { account_id: accountId })
+      }
     });
     return response.data;
   },

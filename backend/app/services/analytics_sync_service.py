@@ -14,6 +14,9 @@ from app.models.analytics_metric import AnalyticsMetric
 from app.models.ebay_account import EbayAccount
 from app.clients.analytics_api_client import AnalyticsAPIClient
 from app.services.ebay_oauth_service import EbayOAuthService
+from app.services.rate_limiter import RateLimiter
+from app.services.cache_service import CacheService
+from app.clients.ebay_client_base import EbayRateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +28,8 @@ class AnalyticsSyncService:
         self.db = db
         self.analytics_client = AnalyticsAPIClient()
         self.oauth_service = EbayOAuthService()
+        self.rate_limiter = RateLimiter()
+        self.cache_service = CacheService()
 
     async def sync_account_analytics(
         self,
@@ -45,6 +50,15 @@ class AnalyticsSyncService:
             recorded_date = date.today()
 
         logger.info(f"Starting analytics sync for account {account.id} on {recorded_date}")
+
+        # Check if already synced today
+        if self.cache_service.is_synced_today(str(account.id), "analytics"):
+            logger.info(f"Analytics for account {account.id} already synced today, skipping")
+            return {
+                'total_listings': 0,
+                'synced': 0,
+                'cached': True
+            }
 
         # アクセストークンを取得
         access_token = await self.oauth_service.get_valid_access_token(self.db, account.tenant_id)
@@ -76,11 +90,18 @@ class AnalyticsSyncService:
             batch_ids = listing_ids[i:i + batch_size]
 
             try:
+                # Check rate limit before API call
+                if not self.rate_limiter.check_rate_limit(str(account.tenant_id), "analytics", 1):
+                    raise EbayRateLimitError("Analytics API rate limit reached for today")
+
                 # Analytics APIからデータ取得
                 traffic_data = self.analytics_client.get_listing_traffic(
                     access_token=access_token,
                     listing_ids=batch_ids
                 )
+
+                # Record API call
+                self.rate_limiter.record_api_call(str(account.tenant_id), "analytics", 1)
 
                 # データをパースして保存
                 synced_count += self._save_analytics_data(
@@ -89,15 +110,22 @@ class AnalyticsSyncService:
                     recorded_date
                 )
 
+            except EbayRateLimitError:
+                logger.warning(f"Rate limit reached, stopping analytics sync")
+                break
             except Exception as e:
                 logger.error(f"Failed to sync analytics batch {i}-{i+batch_size}: {e}")
                 continue
+
+        # Mark as synced today
+        self.cache_service.mark_synced_today(str(account.id), "analytics")
 
         logger.info(f"Analytics sync completed: {synced_count}/{len(listings)} listings")
 
         return {
             'total_listings': len(listings),
-            'synced': synced_count
+            'synced': synced_count,
+            'cached': False
         }
 
     def _save_analytics_data(

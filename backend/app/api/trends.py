@@ -59,6 +59,13 @@ def get_top_trending(
             analysis_date = latest_analysis.analysis_date
 
     # クエリを構築
+    # テナントのeBayアカウントIDを取得
+    from app.models.ebay_account import EbayAccount
+    tenant_account_ids = db.query(EbayAccount.id).filter(
+        EbayAccount.tenant_id == current_tenant.id,
+        EbayAccount.is_active == True
+    ).subquery()
+
     query = db.query(
         TrendAnalysis,
         Listing.item_id,
@@ -70,16 +77,7 @@ def get_top_trending(
     ).join(
         Listing, TrendAnalysis.listing_id == Listing.id
     ).filter(
-        Listing.account_id.in_(
-            db.query(db.query(Listing.account_id).distinct()).filter(
-                Listing.account_id.in_(
-                    # テナントのeBayアカウントのみ
-                    db.query(db.query(Listing.account_id).distinct()).join(
-                        db.query(Listing).filter(Listing.account_id != None)
-                    )
-                )
-            )
-        ),
+        Listing.account_id.in_(tenant_account_ids),
         TrendAnalysis.analysis_date == analysis_date,
         TrendAnalysis.is_trending == True
     )

@@ -1,0 +1,1131 @@
+# CLAUDE.md - eBay トレンドリサーチツール 開発ガイド
+
+このドキュメントは、Claude Codeでの開発を円滑に進めるための開発ガイドです。
+
+---
+
+## 📋 プロジェクト概要
+
+### プロジェクト名
+**eBay カスタムトレンドリサーチツール**
+
+### 目的
+eBay出品者が自身の商品パフォーマンスをモニタリングし、View数やWatch数が急成長している商品（トレンド商品）を自動検出することで、関連商品の出品戦略を最適化するツール。
+
+### 主要機能
+1. **マルチアカウント対応**: 複数のeBayアカウントを一元管理
+2. **自動データ収集**: 1日1回、全出品物のメトリクスを自動取得（2,000件/アカウント）
+3. **トレンド分析**: View数・Watch数の成長率を分析し、TOP10を自動抽出
+4. **ダッシュボード**: トレンド商品の可視化とパフォーマンス推移表示
+5. **Analytics統合**: CTR、Impression、Conversion Rateの詳細分析
+6. **Feed API**: 初回同期時の高速バルクデータ取得
+
+---
+
+## 📝 実装状況
+
+### ✅ Phase 1-8: 完了
+
+すべての主要機能が実装され、実際のeBay APIと接続可能な状態です。
+
+#### Phase 1: 基盤構築
+- Docker環境（PostgreSQL 16, Redis 7, FastAPI, React 18, Celery）
+- データベース設計とマイグレーション
+- プロジェクト構造の構築
+
+#### Phase 2: 認証システム
+- ユーザー登録・ログイン（JWT、bcrypt）
+- トークン自動リフレッシュ
+- Redux状態管理
+
+#### Phase 3: eBay OAuth連携
+- OAuth 2.0フロー実装
+- トークン暗号化（AES-256-GCM）
+- アカウント接続・切断機能
+
+#### Phase 4: データ同期
+- Trading API統合（View/Watch数取得）
+- Listing・DailyMetricモデル
+- Celeryバックグラウンドタスク
+- **モックモード実装**
+
+#### Phase 5: トレンド分析
+- TrendAnalysisモデル
+- トレンドスコア計算（View成長率×0.4 + Watch成長率×0.4 + 価格勢い×0.2）
+- TOP10自動抽出
+- 7日間移動平均算出
+
+#### Phase 6: ダッシュボード強化
+- KPIダッシュボード（実データ接続）
+- パフォーマンスグラフ（Recharts）
+- トレンドTOP10リスト表示
+
+#### Phase 7: Analytics & Feed API統合
+- Analytics API（CTR、Impression、Conversion Rate）
+- Feed API（バルク同期、初回同期高速化）
+- AnalyticsMetricモデル
+
+#### Phase 8: マルチアカウント対応（完了！）
+- ✅ **複数eBayアカウントの一元管理**
+- ✅ **アカウント切り替えタブUI（Material-UI）**
+- ✅ **アカウント別データフィルタリング**
+- ✅ **重複アカウント防止機能**
+- ✅ **OAuth 2.0マルチアカウントフロー**
+
+---
+
+## 🔄 自動バッチスケジュール
+
+Celery Beatによる自動実行スケジュール:
+
+```
+02:00 UTC → Trading API データ同期（View/Watch数）
+02:30 UTC → Analytics API 同期（CTR/Impression/Conversion）
+03:00 UTC → トレンド分析（成長率計算、TOP10抽出）
+毎時      → OAuth トークンリフレッシュ
+```
+
+**手動トリガー可能なタスク:**
+- Feed API バルク同期（初回同期向け）
+- 特定アカウントのみの同期・分析
+
+---
+
+## 📊 データベーススキーマ
+
+### 主要テーブル
+
+#### tenants
+- テナント情報（マルチテナント対応）
+
+#### oauth_credentials
+- OAuth トークン（AES-256-GCM暗号化）
+- **1テナント : 多OAuth認証情報**（マルチアカウント対応）
+
+#### ebay_accounts
+- eBayアカウント情報
+- 各OAuth認証情報に対応（1対1）
+
+#### listings
+- 出品物情報（item_id, title, price, category等）
+
+#### daily_metrics
+- 日次メトリクス（View数、Watch数、価格）
+- Unique constraint: (listing_id, recorded_date)
+
+#### trend_analysis
+- トレンド分析結果
+- トレンドスコア、成長率、ランキング
+- Unique constraint: (listing_id, analysis_date)
+
+#### analytics_metrics
+- Analytics APIメトリクス（CTR、Impression、Conversion Rate）
+- Unique constraint: (listing_id, recorded_date)
+
+---
+
+## ⚠️ 重要な実装上の注意
+
+### 1. eBay OAuth接続の設定（Phase 8で完了）
+
+**現在の状態:**
+- ✅ **OAuth 2.0フローが完全に動作**
+- ✅ **eBay Sandbox環境と接続済み**
+- ✅ **マルチテナント対応（stateパラメータでテナントID管理）**
+- ✅ **トークンはAES-256-GCMで暗号化して保存**
+
+**OAuth接続の設定方法:**
+
+#### 必要な環境変数（`.env`）:
+```bash
+# eBay API Configuration
+EBAY_CLIENT_ID=your_ebay_client_id_here  # App ID形式
+EBAY_CLIENT_SECRET=your_ebay_client_secret_here
+EBAY_REDIRECT_URI=your_ebay_runame_here   # RuName
+EBAY_ENVIRONMENT=sandbox  # または production
+EBAY_MOCK_MODE=false      # 実際のAPI接続
+```
+
+#### ngrokのセットアップ（開発環境でHTTPS必須）:
+
+1. **ngrokをインストール** (Windows):
+   - https://ngrok.com/download からダウンロード
+   - アカウント登録してauthtokenを取得
+
+2. **ngrokを起動**:
+   ```bash
+   ngrok http 8000
+   ```
+
+3. **eBay Developer PortalでRuNameを設定**:
+   - Redirect URL: `https://your-ngrok-url.ngrok-free.app/api/ebay-accounts/callback`
+   - RuNameをコピーして`EBAY_REDIRECT_URI`に設定
+
+4. **Dockerを再起動**:
+   ```bash
+   docker-compose restart backend
+   ```
+
+#### OAuth接続フロー:
+1. ダッシュボードで「Connect eBay Account」ボタンをクリック
+2. eBayログイン画面で認証
+3. コールバックで自動的にトークンを保存
+4. ダッシュボードに「Connected」チップが表示される
+
+**トラブルシューティング:**
+- ngrok URLが変更された場合、eBay RuNameのRedirect URLを更新
+- `EBAY_REDIRECT_URI`にはRuName（識別子）を設定、完全なURLではない
+
+---
+
+### 2. モックモードから本番モードへの移行
+
+**現在の状態:**
+- ✅ **OAuth接続は実際のeBay Sandboxと接続済み**
+- ⚠️ **データ同期APIはまだモックモード**（次フェーズで実装予定）
+- `EBAY_MOCK_MODE=false` に設定済み
+
+**次のステップ（Phase 9予定）:**
+1. ✅ OAuth接続完了（Phase 8で完了）
+2. ⬜ **eBay User API**で実際のユーザー情報を取得
+3. ⬜ **Trading API**でView/Watch数を取得
+4. ⬜ **Analytics API**でCTR/Impression/Conversion Rateを取得
+5. ⬜ **Feed API**で初回同期を実施
+6. ⬜ エラーハンドリングの確認（レート制限、トークン失効等）
+
+### 3. eBay API制限への対応
+
+**標準アカウントの制限:**
+- **1日5,000コール**まで
+
+**使用状況:**
+- Trading API: 約2,010コール/日（2,000件の商品 + ページネーション）
+- Analytics API: 約40コール/日（50件ずつバッチ処理）
+- **合計: 約2,050コール/日**（制限内）
+
+**制限を超える場合の対策:**
+1. Redisキャッシング（同じ日に2回以上取得しない）
+2. Feed APIでバルク取得（1タスクで全件取得、初回のみ）
+3. eBayに申請して上限を拡大
+
+### 4. データ整合性とエラー処理
+
+**実装済みの対策:**
+
+#### ゼロ除算対策
+```python
+def calculate_growth_rate(old_value: int, new_value: int) -> float:
+    """成長率計算（ゼロ除算対策）"""
+    if old_value == 0:
+        return 100.0 if new_value > 0 else 0.0
+    return ((new_value - old_value) / old_value) * 100
+```
+
+#### 欠損データ対策
+```python
+# 前日のメトリクスがない場合
+if not yesterday_metrics:
+    # トレンドスコアは0を返す
+    return 0.0
+```
+
+#### トランザクション管理
+```python
+@celery.task
+def sync_account_data(account_id):
+    try:
+        with db.begin():
+            service.sync_listings(account_id)
+    except Exception as e:
+        logger.error(f"Sync failed: {e}")
+        raise  # リトライ機構が動作
+```
+
+### 5. パフォーマンス最適化
+
+**実装済み:**
+- ✅ データベースインデックス（全主要テーブル）
+- ✅ ユニーク制約（重複データ防止）
+- ✅ Celeryバックグラウンドジョブ
+- ✅ バッチ処理（Analytics: 50件ずつ）
+
+**推奨事項:**
+- N+1問題の回避（joinedload使用）
+- ページネーション（大量データ取得時）
+- Redisキャッシング（APIレスポンス）
+
+**実装例:**
+```python
+# N+1問題の回避
+listings = db.query(Listing).options(
+    joinedload(Listing.daily_metrics),
+    joinedload(Listing.trend_analyses)
+).filter(Listing.account_id == account_id).all()
+```
+
+---
+
+## 🔐 セキュリティチェックリスト
+
+### 本番環境デプロイ前
+
+- [x] `.env`ファイルがgitignoreされている
+- [ ] SECRET_KEY が強力なランダム文字列（32文字以上）
+- [ ] ENCRYPTION_KEY が適切に生成されている（base64エンコード32バイト）
+- [ ] データベースパスワードが強力
+- [ ] CORS設定が本番ドメインのみ許可
+- [ ] PostgreSQL Row Level Security (RLS) 有効化
+- [ ] HTTPS使用（本番環境）
+- [ ] eBay本番環境の認証情報使用
+
+### コードレビュー項目
+
+- [x] SQLインジェクション対策（ORMパラメータバインド使用）
+- [x] XSS対策（フロントエンドでのエスケープ）
+- [x] CSRF対策（OAuth stateパラメータ検証済み）
+- [x] 認証トークンの適切な保存（localStorage使用中）
+- [x] パスワード平文保存なし（bcrypt使用中）
+- [x] OAuth トークン暗号化（AES-256-GCM使用中）
+- [x] **マルチテナント対応**（stateパラメータでテナントID管理）
+- [x] **OAuth stateパラメータのBase64エンコード**（セキュアな送信）
+
+---
+
+## 🔄 データ取得フロー
+
+### Trading API（日次更新）
+**用途**: 基本的なView/Watch数の取得
+- スケジュール: 毎日午前2:00 UTC
+- 取得データ: View数、Watch数、価格、在庫数
+- 制限: 2,000件/アカウント
+
+### Analytics API（日次更新）
+**用途**: 詳細トラフィック分析
+- スケジュール: 毎日午前2:30 UTC
+- 取得データ: Click-Through Rate、Impression、Conversion Rate
+- バッチ処理: 50件ずつ
+
+### Feed API（初回同期のみ）
+**用途**: 初回の大量データ一括取得
+- スケジュール: 手動トリガーのみ
+- 取得データ: 全出品物情報（2,000件以上対応）
+- 利点: Trading APIの10-100倍高速
+
+---
+
+## 🐛 既知の問題と対処法
+
+### 1. bcrypt警告メッセージ
+
+**問題:**
+```
+(trapped) error reading bcrypt version
+AttributeError: module 'bcrypt' has no attribute '__about__'
+```
+
+**対処:**
+- 警告のみで動作に影響なし
+- passlibがbcryptバージョンを読み取れないだけ
+
+### 2. Docker Compose警告
+
+**問題:**
+```
+the attribute `version` is obsolete
+```
+
+**対処:**
+- Docker Compose v2の警告（動作に影響なし）
+
+---
+
+## 🚀 開発再開時のクイックスタート
+
+### 環境の起動
+
+```bash
+# すべてのサービスを起動
+docker-compose up -d
+
+# ログ確認
+docker-compose logs -f backend
+
+# データベースマイグレーション適用
+docker-compose exec backend alembic upgrade head
+```
+
+### モックモードでのテスト
+
+```bash
+# .envファイルで確認
+EBAY_MOCK_MODE=true
+
+# フロントエンド: http://localhost:3000
+# ユーザー登録後、ダッシュボードにアクセス
+
+# データ同期テスト（モックデータ生成）
+curl -X POST http://localhost:8000/api/sync/trigger \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# トレンド分析テスト
+curl -X POST http://localhost:8000/api/trends/analyze \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
+
+### 実際のeBay API接続テスト（Phase 8完了）
+
+```bash
+# .envを本番モードに設定（既に設定済み）
+EBAY_MOCK_MODE=false
+EBAY_CLIENT_ID=your_ebay_client_id_here
+EBAY_CLIENT_SECRET=your_ebay_client_secret_here
+EBAY_REDIRECT_URI=your_ebay_runame_here
+
+# ngrokを起動（別ターミナルで）
+ngrok http 8000
+
+# コンテナ再起動
+docker-compose restart backend celery_worker celery_beat
+
+# OAuth接続テスト
+# 1. http://localhost:3000 でダッシュボードにアクセス
+# 2. 「Connect eBay Account」ボタンをクリック
+# 3. eBayログイン画面で認証
+# 4. ダッシュボードに戻り、「Connected」チップが表示されることを確認
+```
+
+**確認方法:**
+```bash
+# OAuth認証情報を確認
+docker-compose exec backend python -c "
+from app.database import SessionLocal
+from app.models.oauth_credential import OAuthCredential
+db = SessionLocal()
+cred = db.query(OAuthCredential).first()
+if cred:
+    print(f'✅ OAuth認証情報が保存されています')
+    print(f'   有効: {cred.is_valid}')
+    print(f'   アクセストークン期限: {cred.access_token_expires_at}')
+else:
+    print('❌ OAuth認証情報が見つかりません')
+"
+```
+
+---
+
+## 📚 参考リソース
+
+### eBay API
+- [eBay Developer Program](https://developer.ebay.com/)
+- [Trading API Reference](https://developer.ebay.com/Devzone/XML/docs/Reference/eBay/index.html)
+- [Analytics API](https://developer.ebay.com/api-docs/sell/analytics/overview.html)
+- [Feed API](https://developer.ebay.com/api-docs/sell/feed/overview.html)
+- [OAuth 2.0 Guide](https://developer.ebay.com/api-docs/static/oauth-tokens.html)
+
+### 技術ドキュメント
+- [FastAPI](https://fastapi.tiangolo.com/)
+- [Material-UI](https://mui.com/)
+- [Recharts](https://recharts.org/)
+- [Celery](https://docs.celeryq.dev/)
+- [SQLAlchemy](https://www.sqlalchemy.org/)
+- [Alembic](https://alembic.sqlalchemy.org/)
+- [Redux Toolkit](https://redux-toolkit.js.org/)
+
+### プロジェクト内ドキュメント
+- `README.md` - セットアップとクイックスタート
+- `CLAUDE.md` - このファイル（開発ガイド）
+- `PRODUCTION_SETUP.md` - 本番環境セットアップガイド
+- `.serena/memories/` - コードベース構造のドキュメント
+
+---
+
+## 💡 開発のヒント
+
+### Claude Codeでの効率的な開発
+
+1. **段階的な実装**
+   - 機能を小さなタスクに分解
+   - 各タスクを完了後にテスト
+   - 動作確認後にコミット
+
+2. **モック活用**
+   - eBay APIなしで開発継続可能
+   - テストデータで動作確認
+   - 本番API接続は最後
+
+3. **エラーハンドリング**
+   - ゼロ除算、NULL値、欠損データを考慮
+   - ユーザーフレンドリーなエラーメッセージ
+   - ログで詳細を記録
+
+4. **コード品質**
+   - 型ヒント必須（Python、TypeScript）
+   - Docstring記述
+   - 一貫したコーディングスタイル
+
+---
+
+## 📱 マルチアカウント機能の使い方
+
+### アカウントの追加
+
+1. **最初のアカウント接続**
+   - ダッシュボードで「Connect eBay Account」をクリック
+   - eBayでログイン・認証
+
+2. **2つ目以降のアカウント追加**
+   - 「Add Another eBay Account」ボタンをクリック
+   - **別のeBayアカウント**でログイン
+   - → アカウント切り替えタブに追加される
+
+### アカウントの切り替え
+
+ダッシュボード上部にタブが表示されます：
+- **「All Accounts」**: 全アカウントの統合データ
+- **各アカウントタブ**: アカウント別データ
+
+タブをクリックすると、表示データが切り替わります。
+
+### 重要な注意点
+
+- ✅ **異なるeBayアカウント**で接続すること
+- ❌ 同じアカウントで再接続 → 既存データが更新されるのみ
+- ✅ 各アカウントは独立してバッチ処理される
+- ✅ 各アカウントのデータは完全に分離
+
+---
+
+## 🎯 今後の拡張案（オプション）
+
+### 1. 通知機能
+- トレンド商品検出時のメール/Slack通知
+- カスタムアラート設定
+
+### 2. レポート機能
+- 週次・月次レポート自動生成
+- PDF/Excelエクスポート
+
+### 3. 競合分析
+- 競合商品のトラッキング
+- 価格比較機能
+
+### 4. AI推奨機能
+- 最適な出品タイミング提案
+- 価格最適化アドバイス
+
+---
+
+## 🎯 次のステップ（Phase 9: 実データ同期）
+
+### 実装方針
+
+**アプローチ**: Sandbox環境で実データ接続 → Production移行
+
+**理由**:
+- ✅ リスク管理（本番データへの影響なし）
+- ✅ 開発効率（実際のAPI動作を学べる）
+- ✅ 段階的実装（Productionは設定変更のみ）
+
+---
+
+## Phase 9a: Sandbox環境での実データ接続（次フェーズ）
+
+現在、OAuth接続は完了していますが、データ同期は**まだモックモード**です。
+
+### 前提条件
+
+**現在の環境**:
+```bash
+EBAY_ENVIRONMENT=sandbox
+EBAY_MOCK_MODE=false  # ← これで実API接続
+EBAY_CLIENT_ID=your_ebay_client_id_here
+EBAY_CLIENT_SECRET=your_ebay_client_secret_here
+```
+
+**注意**: Sandbox環境にはテストデータしかないため、Seller Hubで事前にテスト出品物を作成する必要があります。
+
+---
+
+### Task 9a-1: eBay User API統合（ユーザー情報取得）
+
+**目的**: OAuth接続後に実際のユーザー情報を取得し、`ebay_accounts`テーブルを更新
+
+**実装場所**: `backend/app/services/ebay_user_service.py`（新規作成）
+
+**実装内容**:
+```python
+class EbayUserService:
+    """eBay User API service for fetching user information"""
+
+    def __init__(self):
+        self.environment = settings.EBAY_ENVIRONMENT
+        self.api_url = "https://api.sandbox.ebay.com" if self.environment == "sandbox" \
+                       else "https://api.ebay.com"
+
+    def get_user_info(self, access_token: str) -> dict:
+        """
+        Fetch user information using access token
+
+        API: GET /commerce/identity/v1/user/
+        Returns: user_id, username, email, registration_marketplace_id
+        """
+        pass
+
+    def update_ebay_account_info(
+        self,
+        db: Session,
+        credential: OAuthCredential,
+        user_info: dict
+    ) -> EbayAccount:
+        """
+        Update ebay_accounts table with real user information
+
+        Before: モックデータ (test_ebay_user_123, test_seller)
+        After: 実データ (actual_user_id, actual_username)
+        """
+        pass
+```
+
+**API仕様**:
+- **Endpoint**: `GET /commerce/identity/v1/user/`
+- **Header**: `Authorization: Bearer {access_token}`
+- **Response**:
+```json
+{
+  "userId": "testuser123",
+  "username": "test_seller",
+  "email": "seller@example.com",
+  "registrationMarketplaceId": "EBAY_US"
+}
+```
+
+**トリガータイミング**:
+- OAuth callback成功直後（`/api/ebay-accounts/callback`内）
+- 既存のOAuth接続に対しては手動トリガーエンドポイントを用意
+
+**成功基準**:
+- ✅ User APIから実際のユーザー情報を取得できる
+- ✅ `ebay_accounts`テーブルが実データで更新される
+- ✅ ダッシュボードに実際のユーザー名が表示される
+
+---
+
+### Task 9a-2: Trading API統合（出品物データ同期）
+
+**目的**: View/Watch数を含む出品物データを取得
+
+**実装場所**: `backend/app/services/ebay_trading_service.py`（モックから実装に変更）
+
+**実装内容**:
+```python
+class EbayTradingService:
+    """eBay Trading API service for fetching listings data"""
+
+    def sync_active_listings(self, credential: OAuthCredential) -> List[dict]:
+        """
+        Fetch active listings using Trading API
+
+        API: GetMyeBaySelling
+        Returns: List of listings with View/Watch counts
+        """
+        pass
+
+    def parse_listing_data(self, xml_response: str) -> List[dict]:
+        """
+        Parse XML response from Trading API
+
+        Extract: ItemID, Title, CurrentPrice, Quantity, ViewCount, WatchCount
+        """
+        pass
+
+    def save_listings_and_metrics(
+        self,
+        db: Session,
+        account: EbayAccount,
+        listings_data: List[dict]
+    ):
+        """
+        Save listings and daily metrics to database
+
+        Tables: listings, daily_metrics
+        """
+        pass
+```
+
+**API仕様**:
+- **Endpoint**: Trading API `GetMyeBaySelling`
+- **Method**: XML-based SOAP API
+- **Header**: `X-EBAY-API-IAF-TOKEN: {access_token}`
+- **Request XML**:
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents">
+  <ActiveList>
+    <Include>true</Include>
+    <Pagination>
+      <EntriesPerPage>200</EntriesPerPage>
+      <PageNumber>1</PageNumber>
+    </Pagination>
+  </ActiveList>
+  <DetailLevel>ReturnAll</DetailLevel>
+</GetMyeBaySellingRequest>
+```
+
+**レスポンス例**:
+```xml
+<Item>
+  <ItemID>123456789</ItemID>
+  <Title>Vintage Camera</Title>
+  <SellingStatus>
+    <CurrentPrice>99.99</CurrentPrice>
+  </SellingStatus>
+  <Quantity>1</Quantity>
+  <HitCount>150</HitCount>  <!-- View count -->
+  <WatchCount>5</WatchCount>
+</Item>
+```
+
+**ページネーション**:
+- 200件/ページ
+- 最大2,000件まで取得
+- 10ページ分のループ処理
+
+**成功基準**:
+- ✅ Trading APIから実際の出品物データを取得できる
+- ✅ `listings`テーブルに保存される
+- ✅ `daily_metrics`テーブルにView/Watch数が保存される
+- ✅ ダッシュボードに実際の出品物が表示される
+
+---
+
+### Task 9a-3: Analytics API統合（パフォーマンスメトリクス）
+
+**目的**: CTR、Impression、Conversion Rateなどの詳細メトリクスを取得
+
+**実装場所**: `backend/app/services/ebay_analytics_service.py`（モックから実装に変更）
+
+**実装内容**:
+```python
+class EbayAnalyticsService:
+    """eBay Analytics API service"""
+
+    def get_traffic_report(
+        self,
+        credential: OAuthCredential,
+        listing_ids: List[str],
+        date_range: str = "LAST_7_DAYS"
+    ) -> dict:
+        """
+        Fetch traffic report for listings
+
+        API: GET /sell/analytics/v1/traffic_report
+        Returns: CTR, Impressions, Click counts
+        """
+        pass
+
+    def save_analytics_metrics(
+        self,
+        db: Session,
+        account: EbayAccount,
+        analytics_data: dict
+    ):
+        """
+        Save analytics metrics to database
+
+        Table: analytics_metrics
+        """
+        pass
+```
+
+**API仕様**:
+- **Endpoint**: `GET /sell/analytics/v1/traffic_report`
+- **Query Parameters**:
+  - `dimension=LISTING`
+  - `filter=listingIds:{id1|id2|id3}`
+  - `metric=CLICK_THROUGH_RATE,LISTING_IMPRESSION_TOTAL`
+- **Header**: `Authorization: Bearer {access_token}`
+- **バッチサイズ**: 50件ずつ処理
+
+**レスポンス例**:
+```json
+{
+  "records": [
+    {
+      "listingId": "123456789",
+      "clickThroughRate": "2.5",
+      "listingImpressionTotal": "1000",
+      "totalClickCount": "25"
+    }
+  ]
+}
+```
+
+**成功基準**:
+- ✅ Analytics APIから実際のメトリクスを取得できる
+- ✅ `analytics_metrics`テーブルに保存される
+- ✅ ダッシュボードにCTR/Impressionが表示される
+
+---
+
+### Task 9a-4: エラーハンドリング & リトライ機構
+
+**目的**: API呼び出し失敗時の適切な処理
+
+**実装内容**:
+
+#### レート制限対応
+```python
+class RateLimiter:
+    """eBay API rate limiting handler"""
+
+    def __init__(self, max_calls: int = 5000, period: int = 86400):
+        self.max_calls = max_calls  # 1日5,000コール
+        self.period = period  # 24時間
+
+    def check_rate_limit(self, account_id: str) -> bool:
+        """Check if API call is allowed"""
+        pass
+
+    def record_api_call(self, account_id: str):
+        """Record API call in Redis"""
+        pass
+```
+
+#### トークンリフレッシュ
+```python
+class TokenRefresher:
+    """OAuth token refresh handler"""
+
+    def refresh_if_expired(self, credential: OAuthCredential) -> OAuthCredential:
+        """
+        Check token expiration and refresh if needed
+
+        Access Token: 2時間有効
+        Refresh Token: 18ヶ月有効
+        """
+        pass
+```
+
+#### リトライ機構
+```python
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10)
+)
+def call_ebay_api_with_retry(url, headers, data):
+    """Retry API call with exponential backoff"""
+    pass
+```
+
+**エラーハンドリング**:
+- `401 Unauthorized` → トークンリフレッシュ
+- `429 Too Many Requests` → レート制限、待機
+- `500 Server Error` → リトライ（最大3回）
+- `404 Not Found` → スキップ、ログ記録
+
+**成功基準**:
+- ✅ トークン期限切れ時に自動リフレッシュ
+- ✅ レート制限に達した場合は翌日まで待機
+- ✅ 一時的なエラーは自動リトライ
+
+---
+
+### Task 9a-5: Celery Beatスケジュール設定
+
+**目的**: 日次自動同期の実装
+
+**実装場所**: `backend/app/celery_app.py`
+
+**実装内容**:
+```python
+from celery.schedules import crontab
+
+app.conf.beat_schedule = {
+    'sync-trading-data': {
+        'task': 'app.tasks.sync_tasks.sync_all_accounts_trading',
+        'schedule': crontab(hour=2, minute=0),  # 02:00 UTC
+    },
+    'sync-analytics-data': {
+        'task': 'app.tasks.sync_tasks.sync_all_accounts_analytics',
+        'schedule': crontab(hour=2, minute=30),  # 02:30 UTC
+    },
+    'analyze-trends': {
+        'task': 'app.tasks.trend_tasks.analyze_all_accounts_trends',
+        'schedule': crontab(hour=3, minute=0),  # 03:00 UTC
+    },
+    'refresh-oauth-tokens': {
+        'task': 'app.tasks.oauth_tasks.refresh_expiring_tokens',
+        'schedule': crontab(minute=0),  # 毎時
+    },
+}
+```
+
+**タスク実装**:
+```python
+@celery.task
+def sync_all_accounts_trading():
+    """Sync trading data for all connected accounts"""
+    db = SessionLocal()
+    try:
+        # Get all accounts with valid OAuth credentials
+        accounts = get_active_ebay_accounts(db)
+
+        for account in accounts:
+            sync_single_account_trading.delay(account.id)
+    finally:
+        db.close()
+
+@celery.task(bind=True, max_retries=3)
+def sync_single_account_trading(self, account_id: str):
+    """Sync trading data for single account"""
+    db = SessionLocal()
+    try:
+        account = db.query(EbayAccount).get(account_id)
+        trading_service = EbayTradingService()
+
+        # Fetch and save data
+        listings_data = trading_service.sync_active_listings(account.credential)
+        trading_service.save_listings_and_metrics(db, account, listings_data)
+
+    except Exception as e:
+        logger.error(f"Trading sync failed for account {account_id}: {e}")
+        raise self.retry(exc=e, countdown=300)  # 5分後にリトライ
+    finally:
+        db.close()
+```
+
+**成功基準**:
+- ✅ Celery Beatが起動し、スケジュール通りにタスクが実行される
+- ✅ 各タスクがエラーなく完了する
+- ✅ ログで実行結果を確認できる
+
+---
+
+### Task 9a-6: 手動トリガーエンドポイント
+
+**目的**: テスト・デバッグ用の手動同期エンドポイント
+
+**実装場所**: `backend/app/api/sync.py`
+
+**実装内容**:
+```python
+@router.post("/sync/user-info")
+async def trigger_user_info_sync(
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """Manually trigger user info sync for current tenant"""
+    pass
+
+@router.post("/sync/trading")
+async def trigger_trading_sync(
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """Manually trigger trading data sync"""
+    pass
+
+@router.post("/sync/analytics")
+async def trigger_analytics_sync(
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """Manually trigger analytics data sync"""
+    pass
+
+@router.get("/sync/status")
+async def get_sync_status(
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """Get last sync status and timestamps"""
+    pass
+```
+
+**成功基準**:
+- ✅ 各エンドポイントから手動で同期をトリガーできる
+- ✅ 同期ステータスを確認できる
+
+---
+
+## Phase 9b: データ同期の安定化（Phase 9a完了後）
+
+### 実装内容
+
+1. **パフォーマンス最適化**
+   - バルククエリの最適化
+   - N+1問題の解消
+   - Redisキャッシング
+
+2. **監視・ログ**
+   - Celeryタスクの成功/失敗率
+   - API呼び出し回数
+   - 同期所要時間
+
+3. **通知機能**
+   - 同期失敗時のSlack/メール通知
+   - レート制限到達時のアラート
+
+---
+
+## Phase 10: Production環境への移行（Phase 9b完了後）
+
+### 前提条件
+
+1. **eBay本番アプリケーション作成**
+   - eBay Developer Portalで本番アプリケーションを作成
+   - Production用のClient ID/Secretを取得
+   - Production用のRuNameを設定
+
+2. **本番環境準備**
+   - 実際のドメイン取得
+   - SSL証明書設定
+   - 本番データベース構築
+
+### 環境変数の変更
+
+```bash
+# Production設定
+EBAY_ENVIRONMENT=production  # ← 変更
+EBAY_MOCK_MODE=false
+EBAY_CLIENT_ID=your_production_client_id  # ← Production用
+EBAY_CLIENT_SECRET=your_production_secret  # ← Production用
+EBAY_REDIRECT_URI=your_production_runame  # ← Production用
+```
+
+### 移行手順
+
+1. Sandbox環境で十分なテストを実施
+2. Production認証情報を取得・設定
+3. HTTPS環境を構築（ngrok → 実際のSSL）
+4. 段階的にProductionへ移行（まず1アカウントでテスト）
+5. 全アカウントを移行
+
+---
+
+## 📋 Phase 9a 実装チェックリスト
+
+### Task 9a-1: User API統合
+- [ ] `EbayUserService`クラス実装
+- [ ] User API呼び出し実装
+- [ ] `ebay_accounts`テーブル更新処理
+- [ ] OAuth callback内に統合
+- [ ] 手動トリガーエンドポイント追加
+- [ ] 動作確認（Sandboxで実ユーザー情報取得）
+
+### Task 9a-2: Trading API統合
+- [ ] `EbayTradingService`修正（モック→実装）
+- [ ] XML APIクライアント実装
+- [ ] ページネーション処理
+- [ ] `listings`テーブル保存処理
+- [ ] `daily_metrics`テーブル保存処理
+- [ ] 動作確認（Sandboxで出品物データ取得）
+
+### Task 9a-3: Analytics API統合
+- [ ] `EbayAnalyticsService`修正（モック→実装）
+- [ ] バッチ処理実装（50件ずつ）
+- [ ] `analytics_metrics`テーブル保存処理
+- [ ] 動作確認（Sandboxでメトリクス取得）
+
+### Task 9a-4: エラーハンドリング
+- [ ] レート制限機構実装（Redis）
+- [ ] トークンリフレッシュ機構
+- [ ] リトライ処理（tenacity）
+- [ ] エラーログ記録
+- [ ] 動作確認（各種エラーケース）
+
+### Task 9a-5: Celery Beat設定
+- [ ] スケジュール定義
+- [ ] 各タスク実装
+- [ ] エラーハンドリング
+- [ ] ログ記録
+- [ ] 動作確認（スケジュール実行）
+
+### Task 9a-6: 手動トリガー
+- [ ] `/sync/user-info`エンドポイント
+- [ ] `/sync/trading`エンドポイント
+- [ ] `/sync/analytics`エンドポイント
+- [ ] `/sync/status`エンドポイント
+- [ ] 動作確認（各エンドポイント）
+
+---
+
+## 🔧 開発時の注意事項
+
+### Sandboxテストデータの準備
+
+**重要**: Sandbox環境には実際の出品物がないため、事前にテストデータを作成する必要があります。
+
+1. **Sandbox Seller Hubにアクセス**
+   - https://sandbox.ebay.com/sh/ovw
+   - Sandboxテストアカウントでログイン
+
+2. **テスト出品物を作成**
+   - 最低5-10件の出品物を作成
+   - タイトル、価格、カテゴリーを設定
+   - View/Watch数は自動的に生成される
+
+3. **Trading APIでデータ確認**
+   - GetMyeBaySellingで出品物が取得できることを確認
+
+### デバッグ方法
+
+```bash
+# バックエンドログをリアルタイム監視
+docker-compose logs -f backend
+
+# Celeryワーカーログ監視
+docker-compose logs -f celery_worker
+
+# Celery Beatログ監視
+docker-compose logs -f celery_beat
+
+# データベース確認
+docker-compose exec backend python -c "
+from app.database import SessionLocal
+from app.models.listing import Listing
+db = SessionLocal()
+listings = db.query(Listing).all()
+print(f'Listings count: {len(listings)}')
+for listing in listings[:5]:
+    print(f'  - {listing.item_id}: {listing.title}')
+"
+```
+
+---
+
+**Happy Coding! 🚀**
+
+---
+
+## ✅ 実装完了サマリー
+
+### Phase 1-8: 完了 🎉
+
+すべての主要機能が実装され、実際のeBay APIと接続可能な状態です。
+
+**完了した機能：**
+- ✅ Docker環境構築（PostgreSQL, Redis, FastAPI, React, Celery）
+- ✅ ユーザー認証システム（JWT, bcrypt）
+- ✅ eBay OAuth 2.0フロー（トークン暗号化）
+- ✅ **マルチアカウント対応**（複数eBayアカウント管理）
+- ✅ データ同期基盤（モックモード動作確認済み）
+- ✅ トレンド分析エンジン
+- ✅ リアルタイムダッシュボード
+- ✅ Celery自動バッチスケジュール
+
+### 次のステップ：
+
+**Phase 9: 実データ同期の実装**
+- eBay User API統合（ユーザー情報取得）
+- Trading API統合（View/Watch数取得）
+- Analytics API統合（CTR/Conversion取得）
+- エラーハンドリング＆リトライ機構
+- 本番環境へのデプロイ準備
+
+---
+
+**Last Updated:** 2025-10-16
+**Status:** Phase 8完了、Phase 9準備中

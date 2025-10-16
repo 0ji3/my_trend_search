@@ -36,15 +36,18 @@ const trendsService = {
   /**
    * TOP Nトレンド商品を取得
    * @param limit 取得件数（デフォルト10件）
+   * @param accountId アカウントID（nullの場合は全アカウント）
    * @param analysisDate 分析対象日（未指定の場合は最新）
    */
   getTopTrending: async (
     limit: number = 10,
+    accountId: string | null = null,
     analysisDate?: string
   ): Promise<TopTrendingResponse> => {
     const response = await api.get<TopTrendingResponse>('/trends/top', {
       params: {
         limit,
+        ...(accountId && { account_id: accountId }),
         ...(analysisDate && { analysis_date: analysisDate })
       }
     });

@@ -20,14 +20,41 @@ import {
 import { Delete as DeleteIcon, CheckCircle as CheckCircleIcon } from '@mui/icons-material';
 import ebayService from '../../services/ebay.service';
 import { OAuthStatus } from '../../types';
+import { useSearchParams } from 'react-router-dom';
 
 const EbayConnection: React.FC = () => {
   const [status, setStatus] = useState<OAuthStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check if redirected from OAuth callback
+    const ebayConnected = searchParams.get('ebay_connected');
+    const ebayError = searchParams.get('ebay_error');
+
+    if (ebayConnected === 'true') {
+      setSuccessMessage('eBay account connected successfully!');
+      // Remove the query parameter
+      searchParams.delete('ebay_connected');
+      setSearchParams(searchParams);
+      // Clear success message after 5 seconds
+      setTimeout(() => setSuccessMessage(null), 5000);
+    } else if (ebayError) {
+      const errorMessages: { [key: string]: string } = {
+        'invalid_state': 'Invalid state parameter. Please try again.',
+        'tenant_not_found': 'Account not found. Please contact support.',
+        'auth_failed': 'Authorization failed. Please try again.',
+        'unknown': 'An unexpected error occurred. Please try again.'
+      };
+      setError(errorMessages[ebayError] || 'Connection failed. Please try again.');
+      // Remove the query parameter
+      searchParams.delete('ebay_error');
+      setSearchParams(searchParams);
+    }
+
     loadStatus();
   }, []);
 
@@ -120,6 +147,12 @@ const EbayConnection: React.FC = () => {
           </Alert>
         )}
 
+        {successMessage && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccessMessage(null)}>
+            {successMessage}
+          </Alert>
+        )}
+
         {!status?.is_connected ? (
           <Box>
             <Typography variant="body2" color="text.secondary" paragraph>
@@ -137,14 +170,16 @@ const EbayConnection: React.FC = () => {
         ) : (
           <Box>
             <Box mb={2}>
-              <Typography variant="body2" color="text.secondary">
-                Token Status:{' '}
+              <Box display="flex" alignItems="center" gap={1}>
+                <Typography variant="body2" color="text.secondary">
+                  Token Status:
+                </Typography>
                 {status.has_valid_token ? (
                   <Chip label="Valid" color="success" size="small" />
                 ) : (
                   <Chip label="Expired" color="warning" size="small" />
                 )}
-              </Typography>
+              </Box>
               {status.access_token_expires_at && (
                 <Typography variant="body2" color="text.secondary" mt={0.5}>
                   Expires: {new Date(status.access_token_expires_at).toLocaleString()}
@@ -187,20 +222,27 @@ const EbayConnection: React.FC = () => {
               </Box>
             )}
 
-            <Box>
+            <Box display="flex" gap={1} flexWrap="wrap">
               <Button
-                variant="outlined"
-                color="error"
-                onClick={handleDisconnect}
-                sx={{ mr: 1 }}
+                variant="contained"
+                color="primary"
+                onClick={handleConnect}
+                disabled={connecting}
               >
-                Disconnect OAuth
+                {connecting ? 'Connecting...' : 'Add Another eBay Account'}
               </Button>
               <Button
                 variant="outlined"
                 onClick={loadStatus}
               >
                 Refresh Status
+              </Button>
+              <Button
+                variant="outlined"
+                color="error"
+                onClick={handleDisconnect}
+              >
+                Disconnect All
               </Button>
             </Box>
           </Box>

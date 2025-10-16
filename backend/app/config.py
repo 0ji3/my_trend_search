@@ -33,9 +33,15 @@ class Settings(BaseSettings):
     EBAY_CLIENT_SECRET: str
     EBAY_REDIRECT_URI: str
     EBAY_ENVIRONMENT: str = "sandbox"  # sandbox or production
+    EBAY_MOCK_MODE: bool = False  # Use mock data instead of real API calls
 
     # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8000"
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Convert CORS_ORIGINS string to list"""
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
 
     # Celery
     CELERY_BROKER_URL: str = "redis://redis:6379/0"

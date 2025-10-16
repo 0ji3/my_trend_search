@@ -15,6 +15,7 @@ from app.schemas.sync import (
     SyncStatusResponse,
 )
 from app.tasks.daily_sync import sync_all_accounts, sync_single_account
+from app.tasks.analytics_sync import sync_all_analytics, sync_single_account_analytics
 from app.celery_app import celery
 
 router = APIRouter(prefix="/sync", tags=["sync"])
@@ -171,4 +172,282 @@ def get_sync_history(
     return {
         'accounts': history,
         'total': len(history),
+    }
+
+
+@router.post("/trading", response_model=SyncTriggerResponse, status_code=status.HTTP_202_ACCEPTED)
+def trigger_trading_sync(
+    account_id: str = None,
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger Trading API data synchronization
+
+    Fetches listing data with View/Watch counts from Trading API
+
+    - If account_id is provided, sync only that account
+    - If account_id is None, sync all active accounts for the current tenant
+
+    Returns task_id for status monitoring
+    """
+    if account_id:
+        # Verify account belongs to current tenant
+        account = db.query(EbayAccount).filter(
+            EbayAccount.id == account_id,
+            EbayAccount.tenant_id == current_tenant.id
+        ).first()
+
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="eBay account not found"
+            )
+
+        # Trigger single account sync
+        task = sync_single_account.delay(str(account.id))
+
+        return SyncTriggerResponse(
+            status="accepted",
+            message=f"Trading sync triggered for account {account.ebay_user_id}",
+            task_id=task.id,
+            accounts_to_sync=1
+        )
+
+    else:
+        # Count active accounts for this tenant
+        account_count = db.query(EbayAccount).filter(
+            EbayAccount.tenant_id == current_tenant.id,
+            EbayAccount.is_active == True
+        ).count()
+
+        if account_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No active eBay accounts found"
+            )
+
+        # Trigger sync for all accounts
+        task = sync_all_accounts.delay()
+
+        return SyncTriggerResponse(
+            status="accepted",
+            message="Trading sync triggered for all active accounts",
+            task_id=task.id,
+            accounts_to_sync=account_count
+        )
+
+
+@router.post("/analytics", response_model=SyncTriggerResponse, status_code=status.HTTP_202_ACCEPTED)
+def trigger_analytics_sync(
+    account_id: str = None,
+    recorded_date: str = None,
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """
+    Trigger Analytics API data synchronization
+
+    Fetches traffic report with CTR, Impressions, Conversion Rate from Analytics API
+
+    - If account_id is provided, sync only that account
+    - If account_id is None, sync all active accounts for the current tenant
+    - recorded_date: Optional date in YYYY-MM-DD format (defaults to today)
+
+    Returns task_id for status monitoring
+    """
+    if account_id:
+        # Verify account belongs to current tenant
+        account = db.query(EbayAccount).filter(
+            EbayAccount.id == account_id,
+            EbayAccount.tenant_id == current_tenant.id
+        ).first()
+
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="eBay account not found"
+            )
+
+        # Trigger single account analytics sync
+        task = sync_single_account_analytics.delay(str(account.id), recorded_date)
+
+        return SyncTriggerResponse(
+            status="accepted",
+            message=f"Analytics sync triggered for account {account.ebay_user_id}",
+            task_id=task.id,
+            accounts_to_sync=1
+        )
+
+    else:
+        # Count active accounts for this tenant
+        account_count = db.query(EbayAccount).filter(
+            EbayAccount.tenant_id == current_tenant.id,
+            EbayAccount.is_active == True
+        ).count()
+
+        if account_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No active eBay accounts found"
+            )
+
+        # Trigger analytics sync for all accounts
+        task = sync_all_analytics.delay(recorded_date)
+
+        return SyncTriggerResponse(
+            status="accepted",
+            message="Analytics sync triggered for all active accounts",
+            task_id=task.id,
+            accounts_to_sync=account_count
+        )
+
+
+@router.get("/rate-limit", response_model=dict)
+def get_rate_limit_status(
+    current_tenant: Tenant = Depends(get_current_tenant)
+):
+    """
+    Get current rate limit status for tenant
+
+    Shows API call usage and remaining calls for the day
+
+    Returns:
+        dict: Rate limit information (used, remaining, limit, reset_at)
+    """
+    from app.services.rate_limiter import RateLimiter
+
+    rate_limiter = RateLimiter()
+
+    # Get rate limits for different API types
+    all_apis = rate_limiter.get_remaining_calls(str(current_tenant.id), "all")
+    trading = rate_limiter.get_remaining_calls(str(current_tenant.id), "trading")
+    analytics = rate_limiter.get_remaining_calls(str(current_tenant.id), "analytics")
+
+    return {
+        "all_apis": all_apis,
+        "trading": trading,
+        "analytics": analytics,
+        "tenant_id": str(current_tenant.id)
+    }
+
+
+@router.get("/metrics/statistics", response_model=dict)
+def get_sync_statistics(
+    days: int = 7,
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """
+    Get sync statistics for tenant
+
+    Shows success/failure rates, average duration, API calls, etc.
+
+    Args:
+        days: Number of days to analyze (default: 7)
+
+    Returns:
+        dict: Sync statistics
+    """
+    from app.services.sync_metrics_service import SyncMetricsService
+
+    # Get all accounts for this tenant
+    accounts = db.query(EbayAccount).filter(
+        EbayAccount.tenant_id == current_tenant.id
+    ).all()
+
+    if not accounts:
+        return {
+            "message": "No accounts found",
+            "statistics": {}
+        }
+
+    metrics_service = SyncMetricsService(db)
+
+    # Get combined statistics for all accounts
+    all_stats = []
+    for account in accounts:
+        stats = metrics_service.get_sync_statistics(str(account.id), days)
+        if stats:
+            stats['account_id'] = str(account.id)
+            stats['ebay_user_id'] = account.ebay_user_id
+            all_stats.append(stats)
+
+    # Calculate overall statistics
+    if all_stats:
+        total_syncs = sum(s['total_syncs'] for s in all_stats)
+        successful_syncs = sum(s['successful_syncs'] for s in all_stats)
+        total_items_synced = sum(s['total_items_synced'] for s in all_stats)
+        total_api_calls = sum(s['total_api_calls'] for s in all_stats)
+
+        overall = {
+            'total_syncs': total_syncs,
+            'successful_syncs': successful_syncs,
+            'success_rate': (successful_syncs / total_syncs * 100) if total_syncs > 0 else 0.0,
+            'total_items_synced': total_items_synced,
+            'total_api_calls': total_api_calls,
+            'period_days': days,
+            'accounts_count': len(accounts)
+        }
+    else:
+        overall = {
+            'total_syncs': 0,
+            'successful_syncs': 0,
+            'success_rate': 0.0,
+            'total_items_synced': 0,
+            'total_api_calls': 0,
+            'period_days': days,
+            'accounts_count': len(accounts)
+        }
+
+    return {
+        'overall': overall,
+        'by_account': all_stats
+    }
+
+
+@router.get("/metrics/errors", response_model=dict)
+def get_recent_errors(
+    limit: int = 20,
+    current_tenant: Tenant = Depends(get_current_tenant),
+    db: Session = Depends(get_db)
+):
+    """
+    Get recent sync errors for tenant
+
+    Shows failed/partial sync attempts with error messages
+
+    Args:
+        limit: Maximum number of errors to return (default: 20)
+
+    Returns:
+        dict: Recent errors
+    """
+    from app.services.sync_metrics_service import SyncMetricsService
+
+    # Get all accounts for this tenant
+    accounts = db.query(EbayAccount).filter(
+        EbayAccount.tenant_id == current_tenant.id
+    ).all()
+
+    if not accounts:
+        return {
+            "message": "No accounts found",
+            "errors": []
+        }
+
+    metrics_service = SyncMetricsService(db)
+
+    # Get errors for all accounts
+    all_errors = []
+    for account in accounts:
+        errors = metrics_service.get_recent_errors(str(account.id), limit)
+        all_errors.extend(errors)
+
+    # Sort by date (most recent first)
+    all_errors.sort(key=lambda x: x['synced_at'], reverse=True)
+
+    return {
+        'total_errors': len(all_errors),
+        'errors': all_errors[:limit]
     }
