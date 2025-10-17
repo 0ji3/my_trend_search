@@ -38,14 +38,15 @@ class EbayDataSyncService:
 
     async def sync_account_listings(self, account: EbayAccount) -> Dict[str, Any]:
         """
-        Sync all active listings for one eBay account
+        Sync all active listings for one eBay account (Memory-Optimized with Batch Processing)
 
         Steps:
         1. Get valid access token
-        2. Fetch all active item IDs (GetMyeBaySelling, paginated)
-        3. For each item ID: GetItem to get View/Watch counts
+        2. Fetch items page by page (200 items at a time)
+        3. For each item: GetItem to get View/Watch counts
         4. Update listings table (upsert)
         5. Insert daily_metrics record
+        6. Clear memory every 100 items to prevent OOM
 
         Args:
             account: EbayAccount model instance
@@ -76,6 +77,7 @@ class EbayDataSyncService:
         errors = []
         synced_count = 0
         failed_count = 0
+        COMMIT_BATCH_SIZE = 100  # Commit and clear memory every 100 items
 
         try:
             # Get valid OAuth token
@@ -84,36 +86,82 @@ class EbayDataSyncService:
                 account.tenant_id
             )
 
-            # Fetch all active item IDs (paginated)
-            all_items = await self._fetch_all_active_items(access_token, account.tenant_id)
-            logger.info(f"Found {len(all_items)} active items for account {account.id}")
+            # === BATCH PROCESSING: Fetch and process page by page ===
+            page = 1
+            entries_per_page = 200
+            total_items_found = 0
 
-            # Sync each item
-            for item_summary in all_items:
-                try:
-                    item_id = item_summary['item_id']
-                    if not item_id:
-                        continue
+            while True:
+                # Check rate limit before API call
+                if not self.rate_limiter.check_rate_limit(str(account.tenant_id), "trading", 1):
+                    raise EbayRateLimitError("Trading API rate limit reached for today")
 
-                    # Get detailed item data including View/Watch
-                    item_data = self.trading_client.get_item(item_id, access_token)
+                # Fetch one page at a time (200 items max)
+                result = self.trading_client.get_my_ebay_selling(
+                    access_token,
+                    page_number=page,
+                    entries_per_page=entries_per_page
+                )
 
-                    # Upsert listing
-                    listing = self._upsert_listing(account, item_data)
+                # Record API call
+                self.rate_limiter.record_api_call(str(account.tenant_id), "trading", 1)
 
-                    # Insert daily metric
-                    self._insert_daily_metric(listing, item_data)
+                items_batch = result['items']
+                total_pages = result['total_pages']
+                total_items_found += len(items_batch)
 
-                    synced_count += 1
+                logger.info(
+                    f"Processing page {page}/{total_pages} "
+                    f"({len(items_batch)} items, total: {total_items_found})"
+                )
 
-                except Exception as e:
-                    failed_count += 1
-                    error_msg = f"Failed to sync item {item_summary.get('item_id')}: {str(e)}"
-                    logger.error(error_msg)
-                    errors.append(error_msg)
-                    # Continue with other items
+                # Process items in this page
+                for item_summary in items_batch:
+                    try:
+                        item_id = item_summary['item_id']
+                        if not item_id:
+                            continue
 
-            # Update last_sync_at
+                        # Get detailed item data including View/Watch
+                        item_data = self.trading_client.get_item(item_id, access_token)
+
+                        # Upsert listing
+                        listing = self._upsert_listing(account, item_data)
+
+                        # Insert daily metric
+                        self._insert_daily_metric(listing, item_data)
+
+                        synced_count += 1
+
+                        # === MEMORY OPTIMIZATION: Clear session every 100 items ===
+                        if synced_count % COMMIT_BATCH_SIZE == 0:
+                            self.db.commit()
+                            self.db.expunge_all()  # Remove objects from session to free memory
+                            logger.info(f"✓ Memory cleared after {synced_count} items")
+
+                    except Exception as e:
+                        failed_count += 1
+                        error_msg = f"Failed to sync item {item_summary.get('item_id')}: {str(e)}"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        # Continue with other items
+
+                # === Commit after each page ===
+                self.db.commit()
+                self.db.expunge_all()  # Clear memory after each page
+                logger.info(f"✓ Page {page} completed, memory cleared")
+
+                # Check if we've reached the last page
+                if page >= total_pages:
+                    break
+
+                page += 1
+
+            # Final commit for any remaining items
+            self.db.commit()
+
+            # Update last_sync_at (refresh account object first)
+            self.db.refresh(account)
             account.last_sync_at = datetime.utcnow()
             self.db.commit()
 
@@ -147,50 +195,6 @@ class EbayDataSyncService:
                 'errors': errors,
             }
 
-    async def _fetch_all_active_items(self, access_token: str, tenant_id: str) -> List[Dict[str, Any]]:
-        """
-        Fetch all active item IDs using paginated GetMyeBaySelling
-
-        Args:
-            access_token: OAuth access token
-            tenant_id: Tenant ID for rate limiting
-
-        Returns:
-            List of {'item_id': str, 'title': str}
-        """
-        all_items = []
-        page = 1
-        entries_per_page = 200
-
-        while True:
-            # Check rate limit before API call
-            if not self.rate_limiter.check_rate_limit(str(tenant_id), "trading", 1):
-                raise EbayRateLimitError("Trading API rate limit reached for today")
-
-            # Make API call
-            result = self.trading_client.get_my_ebay_selling(
-                access_token,
-                page_number=page,
-                entries_per_page=entries_per_page
-            )
-
-            # Record API call
-            self.rate_limiter.record_api_call(str(tenant_id), "trading", 1)
-
-            all_items.extend(result['items'])
-
-            logger.debug(
-                f"Fetched page {page}/{result['total_pages']}, "
-                f"items: {len(result['items'])}"
-            )
-
-            # Check if we've reached the last page
-            if page >= result['total_pages']:
-                break
-
-            page += 1
-
-        return all_items
 
     def _upsert_listing(self, account: EbayAccount, item_data: Dict[str, Any]) -> Listing:
         """
